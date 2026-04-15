@@ -1,6 +1,6 @@
-# streaming_markdown_example
+# flutter_markdown_stream_example
 
-Example app for the [`streaming_markdown`](../) Flutter package.
+Example app for the [`flutter_markdown_stream`](../) Flutter package.
 
 The app has two tabs:
 

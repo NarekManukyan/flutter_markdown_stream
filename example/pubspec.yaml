@@ -1,5 +1,5 @@
-name: streaming_markdown_example
-description: Example app for streaming_markdown.
+name: flutter_markdown_stream_example
+description: Example app for flutter_markdown_stream.
 publish_to: "none"
 version: 0.1.0
 
@@ -10,7 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  streaming_markdown:
+  flutter_markdown_stream:
     path: ../
 
 dev_dependencies:

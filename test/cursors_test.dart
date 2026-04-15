@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:streaming_markdown/streaming_markdown.dart';
+import 'package:flutter_markdown_stream/flutter_markdown_stream.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Verifies every cursor in the family pumps at least two frames of

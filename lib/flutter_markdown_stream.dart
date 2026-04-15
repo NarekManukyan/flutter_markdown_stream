@@ -4,7 +4,7 @@
 /// of token chunks (e.g. from an LLM), and it will render the Markdown
 /// progressively — handling unclosed bold, code fences, links, and headers
 /// gracefully along the way.
-library streaming_markdown;
+library flutter_markdown_stream;
 
 export 'src/cursors.dart'
     show

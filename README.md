@@ -1,7 +1,7 @@
-# streaming_markdown
+# flutter_markdown_stream
 
-[![pub package](https://img.shields.io/pub/v/streaming_markdown.svg)](https://pub.dev/packages/streaming_markdown)
-[![license](https://img.shields.io/github/license/NarekManukyan/streaming_markdown.svg)](LICENSE)
+[![pub package](https://img.shields.io/pub/v/flutter_markdown_stream.svg)](https://pub.dev/packages/flutter_markdown_stream)
+[![license](https://img.shields.io/github/license/NarekManukyan/flutter_markdown_stream.svg)](LICENSE)
 
 Flicker-free, crash-safe streaming Markdown widget for Flutter. Drop it into your chat UI, point it at a `Stream<String>` of LLM token chunks, and get smooth, progressive Markdown rendering — even when the syntax is half-typed.
 
@@ -9,14 +9,14 @@ Flicker-free, crash-safe streaming Markdown widget for Flutter. Drop it into you
 
 <!-- GitHub renders the <video> element; pub.dev falls back to the <img> GIF. -->
 <p align="center">
-  <video src="https://raw.githubusercontent.com/NarekManukyan/streaming_markdown/main/demo/demo.mp4"
+  <video src="https://raw.githubusercontent.com/NarekManukyan/flutter_markdown_stream/main/demo/demo.mp4"
          controls muted autoplay loop playsinline width="640">
     Your browser doesn't support the HTML5 video tag.
   </video>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/NarekManukyan/streaming_markdown/main/demo/demo.gif"
+  <img src="https://raw.githubusercontent.com/NarekManukyan/flutter_markdown_stream/main/demo/demo.gif"
        alt="MarkdownStream rendering a streamed LLM response with a blinking cursor"
        width="640" />
 </p>
@@ -27,7 +27,7 @@ Flicker-free, crash-safe streaming Markdown widget for Flutter. Drop it into you
 
 `flutter_markdown` parses each rebuild from scratch. When an LLM emits `**bold` before the closing `**`, or opens a ` ```dart ` fence before the rest of the code arrives, the widget either throws, flashes, or renders the remainder of your document as code until the closing token appears.
 
-`streaming_markdown` fixes that with a small sanitizer that projects the *current buffer* into a syntactically-safe form at render time, then falls back to the raw buffer once the stream completes.
+`flutter_markdown_stream` fixes that with a small sanitizer that projects the *current buffer* into a syntactically-safe form at render time, then falls back to the raw buffer once the stream completes.
 
 ## Features
 
@@ -41,14 +41,14 @@ Flicker-free, crash-safe streaming Markdown widget for Flutter. Drop it into you
 
 ```yaml
 dependencies:
-  streaming_markdown: ^0.1.0
+  flutter_markdown_stream: ^0.1.0
 ```
 
 ## Usage
 
 ```dart
 import 'package:flutter/material.dart';
-import 'package:streaming_markdown/streaming_markdown.dart';
+import 'package:flutter_markdown_stream/flutter_markdown_stream.dart';
 
 class ChatBubble extends StatelessWidget {
   const ChatBubble({super.key, required this.stream});

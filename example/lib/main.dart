@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:streaming_markdown/streaming_markdown.dart';
+import 'package:flutter_markdown_stream/flutter_markdown_stream.dart';
 
 void main() => runApp(const ExampleApp());
 
@@ -11,7 +11,7 @@ class ExampleApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'streaming_markdown example',
+      title: 'flutter_markdown_stream example',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
@@ -42,7 +42,7 @@ class _HomePageState extends State<_HomePage>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('streaming_markdown'),
+        title: const Text('flutter_markdown_stream'),
         bottom: TabBar(
           controller: _tab,
           tabs: const [

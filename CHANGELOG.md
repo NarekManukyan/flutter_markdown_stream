@@ -2,7 +2,7 @@
 
 ## 0.1.0
 
-Initial release of `streaming_markdown` (formerly developed under the working
+Initial release of `flutter_markdown_stream` (formerly developed under the working
 name `flutter_markdown_stream`).
 
 - `MarkdownStream` widget that renders `Stream<String>` of Markdown chunks
