@@ -1,0 +1,31 @@
+name: streaming_markdown
+description: >-
+  Flicker-free, crash-safe streaming Markdown widget for Flutter — renders
+  partial LLM token streams as they arrive, gracefully handling unclosed bold,
+  fenced code blocks, links, and headers. Ships with eight typing-cursor styles.
+version: 0.1.0
+repository: https://github.com/your-org/streaming_markdown
+issue_tracker: https://github.com/your-org/streaming_markdown/issues
+homepage: https://github.com/your-org/streaming_markdown
+
+environment:
+  sdk: ">=3.6.0 <4.0.0"
+  flutter: ">=3.27.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_markdown: ^0.7.1
+  markdown: ^7.1.1
+
+dev_dependencies:
+  flutter_lints: ^3.0.0
+  flutter_test:
+    sdk: flutter
+
+topics:
+  - markdown
+  - streaming
+  - llm
+  - chat
+  - ai
