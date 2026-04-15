@@ -68,8 +68,12 @@ void main() {
   });
 
   testWidgets('swapping streams resets the buffer', (tester) async {
-    final first = StreamController<String>();
-    final second = StreamController<String>();
+    final first = StreamController<String>.broadcast();
+    final second = StreamController<String>.broadcast();
+    addTearDown(() async {
+      if (!first.isClosed) await first.close();
+      if (!second.isClosed) await second.close();
+    });
 
     Widget build(Stream<String> s) => MaterialApp(
           home: Scaffold(
@@ -91,8 +95,12 @@ void main() {
     await tester.pump(const Duration(milliseconds: 1));
     expect(find.textContaining('beta'), findsOneWidget);
 
+    // Close BEFORE tearing down so onDone fires under a mounted widget,
+    // and pump to drain any pending rebuild before the test isolate exits.
     await first.close();
     await second.close();
+    await tester.pump(const Duration(milliseconds: 1));
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('accepts a typed stream via chunkToText', (tester) async {
