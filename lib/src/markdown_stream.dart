@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:markdown/markdown.dart' as md;
 
 import 'safe_markdown_parser.dart';
@@ -50,7 +50,7 @@ typedef ChunkToText<T> = String Function(T chunk);
 /// coalesce into a single rebuild.
 ///
 /// Every `MarkdownBody` customisation hook (`styleSheet`,
-/// `syntaxHighlighter`, `sizedImageBuilder`, `checkboxBuilder`, `bulletBuilder`,
+/// `syntaxHighlighter`, `imageBuilder`, `checkboxBuilder`, `bulletBuilder`,
 /// `builders`, `paddingBuilders`, `extensionSet`, `blockSyntaxes`,
 /// `inlineSyntaxes`, etc.) is forwarded verbatim.
 class MarkdownStream<T> extends StatefulWidget {
@@ -78,7 +78,7 @@ class MarkdownStream<T> extends StatefulWidget {
     this.blockSyntaxes,
     this.inlineSyntaxes,
     this.extensionSet,
-    this.sizedImageBuilder,
+    this.imageBuilder,
     this.checkboxBuilder,
     this.bulletBuilder,
     this.builders = const <String, MarkdownElementBuilder>{},
@@ -152,8 +152,8 @@ class MarkdownStream<T> extends StatefulWidget {
   /// See [MarkdownBody.extensionSet].
   final md.ExtensionSet? extensionSet;
 
-  /// See [MarkdownBody.sizedImageBuilder].
-  final MarkdownSizedImageBuilder? sizedImageBuilder;
+  /// See [MarkdownBody.imageBuilder].
+  final MarkdownImageBuilder? imageBuilder;
 
   /// See [MarkdownBody.checkboxBuilder].
   final MarkdownCheckboxBuilder? checkboxBuilder;
@@ -325,7 +325,7 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
           blockSyntaxes: widget.blockSyntaxes,
           inlineSyntaxes: widget.inlineSyntaxes,
           extensionSet: widget.extensionSet,
-          sizedImageBuilder: widget.sizedImageBuilder,
+          imageBuilder: widget.imageBuilder,
           checkboxBuilder: widget.checkboxBuilder,
           bulletBuilder: widget.bulletBuilder,
           builders: _effectiveBuilders(),
@@ -355,7 +355,7 @@ class _MarkdownBodyWithCursor extends StatelessWidget {
     required this.blockSyntaxes,
     required this.inlineSyntaxes,
     required this.extensionSet,
-    required this.sizedImageBuilder,
+    required this.imageBuilder,
     required this.checkboxBuilder,
     required this.bulletBuilder,
     required this.builders,
@@ -378,7 +378,7 @@ class _MarkdownBodyWithCursor extends StatelessWidget {
   final List<md.BlockSyntax>? blockSyntaxes;
   final List<md.InlineSyntax>? inlineSyntaxes;
   final md.ExtensionSet? extensionSet;
-  final MarkdownSizedImageBuilder? sizedImageBuilder;
+  final MarkdownImageBuilder? imageBuilder;
   final MarkdownCheckboxBuilder? checkboxBuilder;
   final MarkdownBulletBuilder? bulletBuilder;
   final Map<String, MarkdownElementBuilder> builders;
@@ -404,7 +404,7 @@ class _MarkdownBodyWithCursor extends StatelessWidget {
       blockSyntaxes: blockSyntaxes,
       inlineSyntaxes: inlineSyntaxes,
       extensionSet: extensionSet,
-      sizedImageBuilder: sizedImageBuilder,
+      imageBuilder: imageBuilder,
       checkboxBuilder: checkboxBuilder,
       bulletBuilder: bulletBuilder,
       builders: builders,

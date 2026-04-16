@@ -25,7 +25,7 @@ Flicker-free, crash-safe streaming Markdown widget for Flutter. Drop it into you
 
 ## Why?
 
-`flutter_markdown` parses each rebuild from scratch. When an LLM emits `**bold` before the closing `**`, or opens a ` ```dart ` fence before the rest of the code arrives, the widget either throws, flashes, or renders the remainder of your document as code until the closing token appears.
+`flutter_markdown_plus` parses each rebuild from scratch. When an LLM emits `**bold` before the closing `**`, or opens a ` ```dart ` fence before the rest of the code arrives, the widget either throws, flashes, or renders the remainder of your document as code until the closing token appears.
 
 `flutter_markdown_stream` fixes that with a small sanitizer that projects the *current buffer* into a syntactically-safe form at render time, then falls back to the raw buffer once the stream completes.
 
@@ -41,7 +41,7 @@ Flicker-free, crash-safe streaming Markdown widget for Flutter. Drop it into you
 
 ```yaml
 dependencies:
-  flutter_markdown_stream: ^0.1.0
+  flutter_markdown_stream: ^0.2.0
 ```
 
 ## Usage
@@ -207,7 +207,7 @@ For anything else, `Stream.map()` is always the right tool.
 
 ## Customization
 
-`MarkdownStream` is a **superset** of `flutter_markdown`'s `MarkdownBody` —
+`MarkdownStream` is a **superset** of `flutter_markdown_plus`'s `MarkdownBody` —
 every hook exposed by `MarkdownBody` is forwarded verbatim. If you can
 style, theme, or customize it with `MarkdownBody`, you can do the same
 thing with `MarkdownStream`.
@@ -226,7 +226,7 @@ thing with `MarkdownStream`.
 
 `styleSheet`, `styleSheetTheme`, `syntaxHighlighter`, `onTapLink`,
 `onTapText`, `imageDirectory`, `blockSyntaxes`, `inlineSyntaxes`,
-`extensionSet`, `sizedImageBuilder`, `checkboxBuilder`, `bulletBuilder`,
+`extensionSet`, `imageBuilder`, `checkboxBuilder`, `bulletBuilder`,
 `builders`, `paddingBuilders`, `listItemCrossAxisAlignment`,
 `fitContent`, `shrinkWrap`, `softLineBreak`, `selectable`, `padding`.
 
@@ -249,7 +249,7 @@ MarkdownStream(
   codeBuilder: (code, language) => MyCodeBlock(code: code, language: language),
 
   // Custom image loading (e.g. cached_network_image)
-  sizedImageBuilder: (uri, config) => CachedNetworkImage(imageUrl: uri.toString()),
+  imageBuilder: (uri, title, alt) => CachedNetworkImage(imageUrl: uri.toString()),
 
   // Custom checkbox for GFM task lists
   checkboxBuilder: (checked) => Icon(checked ? Icons.check_box : Icons.check_box_outline_blank),

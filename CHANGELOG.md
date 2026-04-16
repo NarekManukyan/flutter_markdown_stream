@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- **Breaking**: Migrated from the discontinued `flutter_markdown` to
+  `flutter_markdown_plus` (the official successor maintained by Foresight Mobile).
+  - `sizedImageBuilder` parameter renamed to `imageBuilder`.
+  - `MarkdownSizedImageBuilder` typedef replaced by `MarkdownImageBuilder`
+    (signature changed from `(Uri, MarkdownImageConfig)` to `(Uri, String?, String?)`).
+- Shortened package description to comply with pub.dev 60–180 character guideline.
+
 ## 0.1.0
 
 Initial release of `flutter_markdown_stream` (formerly developed under the working
