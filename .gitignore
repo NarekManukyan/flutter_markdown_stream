@@ -39,3 +39,6 @@ example/android/local.properties
 # Demo capture intermediates
 demo/raw.mov
 publish.sh
+
+# Claude Code session workspace
+.claude/
