@@ -28,10 +28,17 @@ final class SafeMarkdownParser {
   ///   6. Partial autolinks (`<http://...` without `>`).
   ///   7. Unbalanced bold/italic emphasis runs (`*` and `_`).
   ///   8. Unbalanced strikethrough (`~~`).
+  ///   9. Unbalanced LaTeX delimiters (`$$…$$` and `$…$`), when [latexEnabled]
+  ///      is `true`.
   ///
   /// The function never throws. If anything unexpected happens it falls back
   /// to returning [input] unchanged.
-  static String sanitize(String input) {
+  ///
+  /// Set [latexEnabled] to `true` only when the rendered Markdown is being
+  /// parsed with LaTeX syntax extensions installed — otherwise a trailing
+  /// "$5" (dollars, not math) would be wrongly paired with a synthetic
+  /// closing `$`.
+  static String sanitize(String input, {bool latexEnabled = false}) {
     if (input.isEmpty) return input;
     try {
       var text = _normalizeLineEndings(input);
@@ -44,6 +51,9 @@ final class SafeMarkdownParser {
         out = _stripPartialAutolink(out);
         out = _stripPartialLink(out);
         out = _closeInlineCode(out);
+        if (latexEnabled) {
+          out = _balanceLatexDelimiters(out);
+        }
         out = _balanceStrikethrough(out);
         out = _balanceEmphasis(out);
         return out;
@@ -186,6 +196,32 @@ final class SafeMarkdownParser {
     final m = _partialAutolink.firstMatch(s);
     if (m == null) return s;
     return s.substring(0, m.start);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 5b. LaTeX delimiters (`$$…$$` and `$…$`).
+  // ---------------------------------------------------------------------------
+  //
+  // Only invoked when the caller has opted into LaTeX parsing (a LaTeX
+  // syntax extension is installed). Balances unclosed `$$` blocks first,
+  // then unclosed inline `$…$` pairs. `$$` occurrences are counted as pairs
+  // (two-by-two); inline `$` is counted only where it is not part of a
+  // `$$`.
+  static String _balanceLatexDelimiters(String s) {
+    var out = s;
+    // Count `$$` occurrences. Odd → unclosed block; append a closing `$$`.
+    final blockCount = r'$$'.allMatches(out).length;
+    if (blockCount.isOdd) {
+      out = '$out\$\$';
+    }
+    // Now count standalone `$` (not part of `$$`). We remove `$$` tokens
+    // first so they don't contribute to the single-dollar count.
+    final withoutBlocks = out.replaceAll(r'$$', '');
+    final inlineCount = '\$'.allMatches(withoutBlocks).length;
+    if (inlineCount.isOdd) {
+      out = '$out\$';
+    }
+    return out;
   }
 
   // ---------------------------------------------------------------------------

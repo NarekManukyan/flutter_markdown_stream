@@ -16,7 +16,28 @@ export 'src/cursors.dart'
         SpinnerCursor,
         TypingDotsCursor,
         WaveDotsCursor;
+export 'src/latex_syntax.dart'
+    show
+        LaTeXBlockSyntax,
+        LaTeXBuilder,
+        LaTeXElementBuilder,
+        LaTeXInlineSyntax,
+        kLatexTag;
 export 'src/markdown_stream.dart'
-    show ChunkToText, CodeBlockBuilder, MarkdownStream, MarkdownStreamDoneCallback;
+    show
+        ChunkToText,
+        CodeBlockBuilder,
+        MarkdownStream,
+        MarkdownStreamDoneCallback,
+        MarkdownStreamFactory;
 export 'src/safe_markdown_parser.dart' show SafeMarkdownParser;
 export 'src/stream_adapters.dart' show StreamAdapters;
+export 'src/streaming_config.dart' show StreamingPresets, StreamingTextConfig;
+export 'src/streaming_text_controller.dart'
+    show
+        StreamingCommand,
+        StreamingCommandKind,
+        StreamingState,
+        StreamingStateCallback,
+        StreamingStateExtension,
+        StreamingTextController;

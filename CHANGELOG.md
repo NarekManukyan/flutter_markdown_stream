@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.3.0
+
+- **`StreamingTextController`**: programmatic playback control for
+  `MarkdownStream`. Call `pause()`, `resume()`, `skipToEnd()`, `stop()`, or
+  `restart()` (the latter requires a `streamFactory`). Exposes a
+  `StreamingState` enum (`idle`, `streaming`, `paused`, `completed`,
+  `error`), live `currentText` / `chunkCount`, an `onStateChanged` and
+  `onCompleted` callback, and a `speedMultiplier` that compresses or
+  stretches the effective rebuild debounce.
+- **`StreamingTextConfig` and `StreamingPresets`**: bundle the rebuild
+  debounce and fade settings into a single value. Named presets:
+  `chatGPT`, `claude`, `instant`, `typewriter`, `gentle`, `fast`. Supply a
+  preset directly:
+
+  ```dart
+  MarkdownStream(stream: s, config: StreamingPresets.claude)
+  ```
+- **Trailing-fade effect**: opt-in via `config.fadeInEnabled`. A bottom-edge
+  gradient softens newly-arriving content while streaming and animates
+  away over `fadeInDuration` on `onDone`.
+- **LaTeX support**: supply a `latexBuilder` to `MarkdownStream` to render
+  inline (`$…$`) and block (`$$…$$`) math expressions via your preferred
+  renderer (e.g. `flutter_math_fork`). No math dependency is added to the
+  package — bring your own. Includes `LaTeXBlockSyntax`,
+  `LaTeXInlineSyntax`, `LaTeXElementBuilder`, and a new `latexEnabled`
+  flag on `SafeMarkdownParser.sanitize()` for delimiter balancing during
+  streaming.
+- **RTL / `textDirection`**: wrap rendered output in a `Directionality`
+  when `textDirection` is set, enabling Arabic, Hebrew, and similar
+  right-to-left scripts without external widgets.
+
+All additions are non-breaking and opt-in. No new pub dependencies.
+
 ## 0.2.0
 
 - **Breaking**: Migrated from the discontinued `flutter_markdown` to
