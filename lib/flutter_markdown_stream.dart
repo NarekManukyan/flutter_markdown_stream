@@ -6,6 +6,14 @@
 /// gracefully along the way.
 library flutter_markdown_stream;
 
+// Re-export the transitive packages whose types appear in MarkdownStream's
+// public API (MarkdownStyleSheet, MarkdownElementBuilder, BlockSyntax, …) so
+// consumers don't need to add flutter_markdown_plus / markdown to their own
+// pubspec just to name a parameter type.
+export 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+export 'package:markdown/markdown.dart'
+    show BlockSyntax, ExtensionSet, InlineSyntax;
+
 export 'src/cursors.dart'
     show
         BarCursor,

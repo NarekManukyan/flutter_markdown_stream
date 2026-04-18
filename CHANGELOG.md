@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0
+
+- **Re-exported transitive types**: `flutter_markdown_stream` now re-exports
+  `flutter_markdown_plus` and the relevant symbols from `markdown`
+  (`BlockSyntax`, `InlineSyntax`, `ExtensionSet`) from its main library.
+  Consumers that name types like `MarkdownStyleSheet`,
+  `MarkdownElementBuilder`, `SyntaxHighlighter`, or `BlockSyntax` no longer
+  need to add `flutter_markdown_plus` / `markdown` to their own pubspec —
+  a single import of `package:flutter_markdown_stream/flutter_markdown_stream.dart`
+  is enough.
+
 ## 0.3.0
 
 - **`StreamingTextController`**: programmatic playback control for

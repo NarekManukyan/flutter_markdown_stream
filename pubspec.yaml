@@ -2,7 +2,7 @@ name: flutter_markdown_stream
 description: >-
   Flicker-free streaming Markdown widget for Flutter. Renders partial LLM
   token streams progressively, handling unclosed syntax gracefully.
-version: 0.3.0
+version: 0.4.0
 repository: https://github.com/NarekManukyan/flutter_markdown_stream
 issue_tracker: https://github.com/NarekManukyan/flutter_markdown_stream/issues
 homepage: https://github.com/NarekManukyan/flutter_markdown_stream
