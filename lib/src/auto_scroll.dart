@@ -228,7 +228,12 @@ class StickToBottomController {
       duration: duration ?? autoScrollDuration,
       curve: curve ?? autoScrollCurve,
     );
-    if (!_disposed) _setPinned(true);
+    // The animation may have been interrupted (the user grabbed the list
+    // mid-scroll), so reflect the ACTUAL position rather than assuming we
+    // reached the bottom.
+    if (_disposed || !_hasValidPosition) return;
+    final settled = scrollController.position;
+    _setPinned((settled.maxScrollExtent - settled.pixels) <= threshold);
   }
 
   /// Detaches from [scrollController] and disposes internal listenables.

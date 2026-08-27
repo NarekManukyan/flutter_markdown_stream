@@ -24,6 +24,19 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
+/// Builds the rich, syntax-highlighted span tree for a code body.
+///
+/// Given the raw [code], its [language] tag, and the resolved monospaced
+/// [baseStyle], return an [InlineSpan] (typically a `TextSpan` with children)
+/// with per-token colours applied. Bring your own tokenizer — e.g.
+/// `package:highlight` / `package:flutter_highlight` — so this package stays
+/// dependency-free.
+typedef CodeHighlightBuilder = InlineSpan Function(
+  String code,
+  String language,
+  TextStyle baseStyle,
+);
+
 /// A rounded card that renders a single fenced code block: a top bar with
 /// the language label and a copy button, and a monospaced,
 /// horizontally-scrollable code body that never overflows.
@@ -52,6 +65,7 @@ class CodeBlockView extends StatefulWidget {
     this.showCopyButton = true,
     this.showLanguageLabel = true,
     this.copiedFeedbackDuration = const Duration(milliseconds: 1500),
+    this.highlightBuilder,
   });
 
   /// The raw source code to display and copy.
@@ -97,6 +111,12 @@ class CodeBlockView extends StatefulWidget {
   /// before reverting to the idle "Copy" state. Defaults to 1.5 seconds.
   final Duration copiedFeedbackDuration;
 
+  /// Optional syntax highlighter for the code body. When `null` (the default)
+  /// the code renders as plain monospaced text. Supply a [CodeHighlightBuilder]
+  /// — backed by your preferred tokenizer — to colour tokens; no highlighting
+  /// dependency is added to this package.
+  final CodeHighlightBuilder? highlightBuilder;
+
   /// Returns a `Widget Function(String code, String language)` that builds
   /// a [CodeBlockView] with the given theming knobs baked in.
   ///
@@ -117,6 +137,7 @@ class CodeBlockView extends StatefulWidget {
     bool showCopyButton = true,
     bool showLanguageLabel = true,
     Duration copiedFeedbackDuration = const Duration(milliseconds: 1500),
+    CodeHighlightBuilder? highlightBuilder,
   }) {
     return (String code, String language) => CodeBlockView(
       code: code,
@@ -129,6 +150,7 @@ class CodeBlockView extends StatefulWidget {
       showCopyButton: showCopyButton,
       showLanguageLabel: showLanguageLabel,
       copiedFeedbackDuration: copiedFeedbackDuration,
+      highlightBuilder: highlightBuilder,
     );
   }
 
@@ -183,13 +205,7 @@ class _CodeBlockViewState extends State<CodeBlockView> {
           else
             const Spacer(),
           if (widget.showCopyButton)
-            Flexible(
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerRight,
-                child: _buildCopyButton(labelStyle, iconColor),
-              ),
-            ),
+            _buildCopyButton(labelStyle, iconColor),
         ],
       ),
     );
@@ -203,6 +219,9 @@ class _CodeBlockViewState extends State<CodeBlockView> {
     return Semantics(
       button: true,
       label: label,
+      // Keep the button's activation exposed to assistive tech even though we
+      // collapse the descendant Tooltip/Text semantics.
+      onTap: () => _handleCopy(),
       excludeSemantics: true,
       child: Tooltip(
         message: label,
@@ -260,24 +279,38 @@ class _CodeBlockViewState extends State<CodeBlockView> {
     final Color iconColor = labelStyle.color ?? scheme.onSurfaceVariant;
     final Color dividerColor = scheme.outlineVariant.withValues(alpha: 0.4);
 
-    return ClipRRect(
-      borderRadius: widget.borderRadius,
-      child: DecoratedBox(
-        decoration: BoxDecoration(color: background),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            if (widget.showLanguageLabel || widget.showCopyButton)
-              _buildHeader(labelStyle, iconColor, dividerColor),
-            Padding(
-              padding: widget.padding,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Text(widget.code, style: codeStyle),
+    // Fill the available width so the card spans the message column and the
+    // copy control sits at the true right edge (a shrink-wrapped card would
+    // size to its content and leave the button mid-row).
+    return SizedBox(
+      width: double.infinity,
+      child: ClipRRect(
+        borderRadius: widget.borderRadius,
+        child: DecoratedBox(
+          decoration: BoxDecoration(color: background),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (widget.showLanguageLabel || widget.showCopyButton)
+                _buildHeader(labelStyle, iconColor, dividerColor),
+              Padding(
+                padding: widget.padding,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: widget.highlightBuilder == null
+                      ? Text(widget.code, style: codeStyle)
+                      : Text.rich(
+                          widget.highlightBuilder!(
+                            widget.code,
+                            widget.language,
+                            codeStyle,
+                          ),
+                        ),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

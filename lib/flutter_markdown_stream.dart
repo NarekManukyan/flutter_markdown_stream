@@ -16,7 +16,7 @@ export 'package:markdown/markdown.dart'
 
 export 'src/auto_scroll.dart'
     show AutoScroll, AutoScrollState, StickToBottomController;
-export 'src/code_block_view.dart' show CodeBlockView;
+export 'src/code_block_view.dart' show CodeBlockView, CodeHighlightBuilder;
 export 'src/cursors.dart'
     show
         BarCursor,

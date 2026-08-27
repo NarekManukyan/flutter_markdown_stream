@@ -180,6 +180,9 @@ class _StreamScaffoldState extends State<_StreamScaffold> {
                         config: config,
                         incrementalParsing: widget.incremental,
                         wordFadeIn: true,
+                        // Fill the viewport width so full-width blocks (e.g. the
+                        // code card) align to the message edges.
+                        fitContent: false,
                         codeBuilder: widget.codeBuilder,
                         cursorWidget: const BlinkingCursor(
                           semanticLabel: 'Assistant is typing',
@@ -224,8 +227,50 @@ class CodeBlockScreen extends StatelessWidget {
         title: 'Code block',
         buildStream: () => _demoChunks,
         incremental: true,
-        codeBuilder: CodeBlockView.builder(),
+        codeBuilder: CodeBlockView.builder(highlightBuilder: _demoHighlight),
       );
+}
+
+/// A tiny, dependency-free highlighter used only to demonstrate
+/// `CodeBlockView.highlightBuilder`. Real apps would plug in a proper
+/// tokenizer such as `package:highlight` / `package:flutter_highlight`.
+InlineSpan _demoHighlight(String code, String language, TextStyle base) {
+  const keywords = <String>{
+    'void', 'main', 'final', 'const', 'class', 'extends', 'return', 'if',
+    'else', 'for', 'while', 'import', 'var', 'true', 'false', 'null', 'new',
+    'async', 'await', 'print',
+  };
+  final keyword =
+      base.copyWith(color: const Color(0xFFB388FF), fontWeight: FontWeight.w600);
+  final string = base.copyWith(color: const Color(0xFF80CBC4));
+  final comment =
+      base.copyWith(color: const Color(0xFF9E9E9E), fontStyle: FontStyle.italic);
+  final number = base.copyWith(color: const Color(0xFFFFB74D));
+  final token = RegExp(
+    r'''//[^\n]*|'[^']*'|"[^"]*"|\b\d+(?:\.\d+)?\b|[A-Za-z_]\w*|\s+|[^\w\s]''',
+  );
+  final spans = <TextSpan>[
+    for (final m in token.allMatches(code))
+      TextSpan(text: m.group(0), style: _styleFor(m.group(0)!, base, keywords,
+          keyword: keyword, string: string, comment: comment, number: number)),
+  ];
+  return TextSpan(children: spans);
+}
+
+TextStyle _styleFor(
+  String t,
+  TextStyle base,
+  Set<String> keywords, {
+  required TextStyle keyword,
+  required TextStyle string,
+  required TextStyle comment,
+  required TextStyle number,
+}) {
+  if (t.startsWith('//')) return comment;
+  if (t.startsWith("'") || t.startsWith('"')) return string;
+  if (RegExp(r'^\d').hasMatch(t)) return number;
+  if (keywords.contains(t)) return keyword;
+  return base;
 }
 
 class CursorsScreen extends StatelessWidget {

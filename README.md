@@ -196,6 +196,23 @@ MarkdownStream(
 );
 ```
 
+For syntax highlighting, pass a `highlightBuilder` — bring your own tokenizer
+(e.g. `package:highlight` / `package:flutter_highlight`) so this package stays
+dependency-free:
+
+```dart
+CodeBlockView.builder(
+  highlightBuilder: (code, language, baseStyle) {
+    // return an InlineSpan (TextSpan tree) with per-token colours
+    return myHighlighter.toTextSpan(code, language, baseStyle);
+  },
+);
+```
+
+Code blocks render full width (with the copy control at the top-right) when the
+surrounding `MarkdownStream` fills its width — pass `fitContent: false` if your
+layout otherwise shrink-wraps.
+
 ### Incremental parsing (long answers)
 
 Re-parsing the whole buffer every frame is O(n²) over a long response. Turn on

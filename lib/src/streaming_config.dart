@@ -27,7 +27,12 @@ class StreamingTextConfig {
     this.smoothingEnabled = false,
     this.charsPerSecond = 120,
     this.smoothingMaxBacklogChars = 400,
-  });
+  })  : assert(charsPerSecond > 0, 'charsPerSecond must be positive'),
+        assert(
+          smoothingMaxBacklogChars > 0,
+          'smoothingMaxBacklogChars must be positive',
+        ),
+        assert(trailingFadeHeight >= 0, 'trailingFadeHeight must be >= 0');
 
   /// Minimum time between rebuilds. Bursts of tokens inside a debounce window
   /// produce at most one rebuild. Defaults to one frame (16 ms).

@@ -88,6 +88,12 @@ class WordFadeText extends StatelessWidget {
 
     final totalWords = runs.where((r) => r.isWord).length;
 
+    // Resolve the ambient text colour so the fade never falls back to a
+    // hardcoded black (which would be invisible-on-dark).
+    final Color fallbackColor = baseStyle.color ??
+        DefaultTextStyle.of(context).style.color ??
+        const Color(0xFF000000);
+
     // Pass 2: build spans, grading the last [fadeWindow] words.
     var wordIndex = 0;
     final spans = <InlineSpan>[];
@@ -102,7 +108,7 @@ class WordFadeText extends StatelessWidget {
         // enough; keep it opaque to avoid flicker in the gaps.
         opacity = 1;
       }
-      final color = (run.style.color ?? const Color(0xFF000000));
+      final color = run.style.color ?? fallbackColor;
       spans.add(
         TextSpan(
           text: run.text,

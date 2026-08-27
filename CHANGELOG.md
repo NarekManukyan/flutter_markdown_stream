@@ -47,7 +47,9 @@ New streaming feel, chat-UI helpers, performance, and correctness fixes.
 - **`CodeBlockView`** (+ `CodeBlockView.builder()`): a polished default fenced
   code block with a language label and copy-to-clipboard button, theme-aware
   and horizontally scrollable. Use as `MarkdownStream(codeBuilder:
-  CodeBlockView.builder())`.
+  CodeBlockView.builder())`. Optional `highlightBuilder`
+  (`CodeHighlightBuilder`) plugs in your own syntax highlighter without adding
+  a dependency; the copy control carries a proper button + tap semantics.
 
 ### Performance
 

@@ -168,6 +168,11 @@ class MarkdownStream<T> extends StatefulWidget {
   /// Set to [Duration.zero] to rebuild on every chunk (useful for tests).
   ///
   /// Overridden by [config]`.rebuildDebounce` when both are provided.
+  ///
+  /// **Inert while smoothing is active.** Since smoothing is on by default
+  /// (see [config]), the smoother's own tick drives cadence and this value is
+  /// ignored. It only takes effect when smoothing is disabled, e.g.
+  /// `config: StreamingPresets.instant` or `StreamingTextConfig(smoothingEnabled: false)`.
   final Duration rebuildDebounce;
 
   /// Optional convenience builder for fenced (block) code only.
@@ -567,8 +572,11 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
 
   void _onStreamDone() {
     _debounceTimer?.cancel();
-    // Snap past any pending paced reveal and stop the smoother so a late tick
-    // cannot overwrite the final, fully-rendered text.
+    // Intentional: on completion we snap straight to the full text rather than
+    // letting the smoother drain its backlog over `finishDuration`. Once the
+    // stream is done the reader wants the whole answer immediately, not a few
+    // more seconds of paced reveal. Tearing the smoother down first also stops
+    // a late tick from overwriting the final, fully-rendered text.
     _teardownSmoother();
     _renderNow(done: true);
     widget.onDone?.call(_raw.toString());

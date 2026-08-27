@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_stream/src/code_block_view.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -214,5 +215,55 @@ void main() {
 
     expect(find.text('print(1);'), findsOneWidget);
     expect(find.text('dart'), findsNothing);
+  });
+
+  testWidgets('copy button exposes a tap semantics action', (tester) async {
+    final handle = tester.ensureSemantics();
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(body: CodeBlockView(code: 'a', language: 'dart')),
+      ),
+    );
+
+    final data = tester
+        .getSemantics(find.bySemanticsLabel('Copy'))
+        .getSemanticsData();
+    expect(data.hasAction(SemanticsAction.tap), isTrue);
+    handle.dispose();
+  });
+
+  testWidgets('highlightBuilder renders the supplied spans', (tester) async {
+    const highlightColor = Color(0xFFB388FF);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CodeBlockView(
+            code: 'const x = 1;',
+            language: 'dart',
+            highlightBuilder: (code, language, base) => TextSpan(
+              text: code,
+              style: base.copyWith(color: highlightColor),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    // The code body is now a Text.rich carrying the highlighter's colour.
+    final riches = tester.widgetList<RichText>(find.byType(RichText));
+    var sawColor = false;
+    for (final r in riches) {
+      void walk(InlineSpan s) {
+        if (s is TextSpan) {
+          if (s.style?.color == highlightColor) sawColor = true;
+          for (final c in s.children ?? const <InlineSpan>[]) {
+            walk(c);
+          }
+        }
+      }
+
+      walk(r.text);
+    }
+    expect(sawColor, isTrue);
   });
 }
