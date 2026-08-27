@@ -31,17 +31,20 @@ Flicker-free, crash-safe streaming Markdown widget for Flutter. Drop it into you
 
 ## Features
 
-- Handles unclosed bold, italic, strikethrough, inline code, fenced code blocks, autolinks, and inline links mid-stream.
-- One-frame debounce coalesces bursts of tokens into a single rebuild.
-- Pluggable `codeBuilder` for custom code-block rendering (syntax highlighters, copy buttons, etc.).
-- Optional blinking cursor widget while the stream is open.
+- Handles unclosed bold, italic, strikethrough, inline code, fenced code blocks, autolinks, inline links, **incomplete GFM tables**, and LaTeX delimiters mid-stream — with CommonMark-correct flanking rules, so bullet lists, thematic breaks, and stray `*`/`$` in prose are never mangled.
+- One-frame debounce coalesces bursts of tokens into a single rebuild, plus optional **output smoothing** that paces bursty tokens into an even, ChatGPT/Claude-style flow.
+- **Opt-in `AutoScroll`** stick-to-bottom for chat UIs, modelled on Claude mobile (follows the bottom, disengages when you scroll up, never yanks).
+- Ready-made **`CodeBlockView`** with a language label and copy button, or bring your own `codeBuilder`.
+- Optional **incremental parsing** for long answers — settled blocks are parsed once, not re-parsed every frame.
+- Eight cursor widgets, all screen-reader friendly (`ExcludeSemantics` + optional `semanticLabel`).
+- `onTextChanged` for live progress, and a `StreamingTextController` for pause / resume / skip / restart.
 - Pure Dart sanitizer — fully unit-tested, zero platform channels.
 
 ## Install
 
 ```yaml
 dependencies:
-  flutter_markdown_stream: ^0.2.0
+  flutter_markdown_stream: ^0.5.0
 ```
 
 ## Usage
@@ -78,6 +81,138 @@ class ChatBubble extends StatelessWidget {
     );
   }
 }
+```
+
+## Streaming feel & chat-UI helpers (0.5.0)
+
+### Smooth by default
+
+Since 0.5.0, `MarkdownStream` **smooths and word-fades out of the box** — the
+ChatGPT/Claude feel with no configuration. For instant, un-animated text:
+
+```dart
+MarkdownStream(
+  stream: llmStream,
+  wordFadeIn: false,
+  config: StreamingPresets.instant,
+);
+```
+
+### Per-word fade-in (`wordFadeIn`)
+
+The words in the paragraph currently being streamed fade in (opacity only, no
+blur) as they arrive — settled text stays full-fidelity, and everything is
+opaque once the stream completes.
+
+```dart
+MarkdownStream(stream: llmStream);                 // on by default
+MarkdownStream(stream: llmStream, wordFadeWindow: 6); // longer, softer fade
+```
+
+It applies to prose (with inline bold/italic/code/links); code blocks, tables,
+lists, headings, and blockquotes stream without a fade.
+
+### Output smoothing
+
+Debounce only *coalesces* bursty tokens; smoothing *paces* them, so text flows
+at a steady rate no matter how lumpy the network delivery is. It's on by
+default; tune or swap the feel with a config or preset:
+
+```dart
+MarkdownStream(stream: llmStream, config: StreamingPresets.claude); // or .chatGPT / .smooth
+MarkdownStream(
+  stream: llmStream,
+  config: const StreamingTextConfig(smoothingEnabled: true, charsPerSecond: 140),
+);
+```
+
+### Auto-scroll (opt-in, Claude-mobile behaviour)
+
+Nothing scrolls unless you ask. Wrap your streaming content in `AutoScroll` and
+it follows the bottom while you're already there, disengages the instant you
+scroll up to read, and re-engages when you return — it never yanks you down.
+
+Following is **automatic**: `AutoScroll` watches the scrollable's
+`ScrollMetricsNotification`, so it re-follows every time the content grows —
+including while a `MarkdownStream` streams tokens inside it. You do **not** wire
+up a trigger.
+
+```dart
+AutoScroll(
+  child: Column(
+    children: [
+      for (final message in messages) MessageBubble(message),
+      MarkdownStream(stream: llmStream), // grows → AutoScroll follows
+    ],
+  ),
+);
+```
+
+Set `enabled: false` at any time to freeze following without unwrapping.
+
+#### `StickToBottomController`
+
+`AutoScroll` owns its scroll + stick-to-bottom controllers internally. Supply
+your own `StickToBottomController` when you need to read its state or drive it
+from elsewhere in the tree — e.g. to render a "jump to latest" button:
+
+```dart
+final stick = StickToBottomController();
+
+AutoScroll(controller: stick, child: messageColumn);
+
+// Elsewhere: show a button only while the user has scrolled away.
+ValueListenableBuilder<bool>(
+  valueListenable: stick.showScrollToBottomButtonListenable,
+  builder: (context, show, _) => show
+      ? FloatingActionButton.small(
+          onPressed: stick.jumpToBottom, // not gated by `enabled`
+          child: const Icon(Icons.arrow_downward),
+        )
+      : const SizedBox.shrink(),
+);
+```
+
+Key surface:
+
+| Member | What it does |
+|---|---|
+| `bool get isPinnedToBottom` | Whether the view is within `threshold` (default 32px) of the bottom. Tracks reality even while `enabled == false`. |
+| `pinnedToBottomListenable` | `ValueListenable<bool>` of the above. |
+| `showScrollToBottomButtonListenable` | `ValueListenable<bool>` — `true` only when `enabled` and not pinned. Render your own button from it. |
+| `follow({animate})` | Follow to the bottom **if** enabled and currently pinned. Called automatically on content growth. |
+| `jumpToBottom()` / `animateToBottom()` | Imperative scroll to bottom and re-pin. **Not** gated by `enabled` (this is a user tapping "jump"). |
+| `enabled` (get/set) | Runtime toggle. `false` = transparent passthrough: no following, no button state, never fights the user. |
+
+You can also attach a `StickToBottomController` to your **own** `ScrollView`
+(pass its `scrollController`) instead of using `AutoScroll`.
+
+### Code blocks with a copy button
+
+```dart
+MarkdownStream(
+  stream: llmStream,
+  codeBuilder: CodeBlockView.builder(), // language label + copy button
+);
+```
+
+### Incremental parsing (long answers)
+
+Re-parsing the whole buffer every frame is O(n²) over a long response. Turn on
+incremental parsing to parse settled blocks once and reuse them — the settled
+output is identical, it's a pure performance switch.
+
+```dart
+MarkdownStream(stream: llmStream, incrementalParsing: true);
+```
+
+### Accessible cursors
+
+```dart
+MarkdownStream(
+  stream: llmStream,
+  cursorWidget: const TypingDotsCursor(semanticLabel: 'Assistant is typing'),
+);
 ```
 
 ## Edge cases handled

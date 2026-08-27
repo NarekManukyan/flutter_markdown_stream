@@ -1,5 +1,85 @@
 # Changelog
 
+## 0.5.0
+
+New streaming feel, chat-UI helpers, performance, and correctness fixes.
+
+### Behaviour changes (defaults now animated)
+
+- `MarkdownStream` now **smooths and word-fades by default**, for a
+  ChatGPT/Claude-style feel out of the box:
+  - **Output smoothing** is on when no `config` is supplied.
+  - **`wordFadeIn` defaults to `true`.**
+  - Opt back to instant text with
+    `MarkdownStream(wordFadeIn: false, config: StreamingPresets.instant)`.
+- `StreamingPresets.chatGPT` / `.claude` also enable smoothing.
+
+### Streaming feel
+
+- **Per-word fade-in (`wordFadeIn`)**: the words in the paragraph currently
+  being streamed fade opacity 0→1 as they arrive (the calm, per-word effect
+  used by ChatGPT/Claude — opacity only, no blur). Settled blocks render at
+  full fidelity; everything is opaque once the stream completes. Tune with
+  `wordFadeWindow`; `WordFadeText` is exported for standalone use.
+- **Output smoothing (`OutputSmoother`)**: a paced character-reveal buffer that
+  drains bursty token delivery at a steady rate. Configure via
+  `StreamingTextConfig(smoothingEnabled: …, charsPerSecond: …)` or
+  `StreamingPresets.smooth`. Backlog past `smoothingMaxBacklogChars`
+  accelerates so a finished stream never lags.
+- **Trailing fade** (`fadeInEnabled`) remains available as an opt-in bottom-edge
+  gradient, separate from the per-word fade.
+
+### Widgets
+
+- **`AutoScroll` / `StickToBottomController`**: opt-in, runtime-toggleable
+  stick-to-bottom scrolling modelled on Claude's mobile chat — follows the
+  bottom only while the user is already there, disengages the moment they
+  scroll up (never yanks back), and exposes a "jump to latest" state. Disabled
+  by default at the package level; `MarkdownStream` never force-scrolls on its
+  own.
+  - **Auto-follows content growth automatically** via
+    `ScrollMetricsNotification` — no `trigger` needed, even while a
+    `MarkdownStream` streams inside it (`trigger` remains as an optional
+    fallback).
+  - Follows by **jumping** while content grows (an animated follow lags behind
+    a fast stream); imperative `animateToBottom()` stays available for a
+    user-tapped "jump to latest" button.
+- **`CodeBlockView`** (+ `CodeBlockView.builder()`): a polished default fenced
+  code block with a language label and copy-to-clipboard button, theme-aware
+  and horizontally scrollable. Use as `MarkdownStream(codeBuilder:
+  CodeBlockView.builder())`.
+
+### Performance
+
+- **Incremental parsing** (`MarkdownStream(incrementalParsing: true)`,
+  `IncrementalMarkdownBody`): settled blocks are parsed once and reused instead
+  of re-parsed every frame, keeping per-frame cost proportional to the active
+  block rather than the whole response. Off by default; settled output is
+  identical.
+
+### Sanitizer correctness
+
+- Emphasis balancing is now **flanking-aware**: spaced asterisks (`a * b`),
+  bullet markers (`* one`), thematic breaks (`***`), and arithmetic
+  (`2 * 3 = 6`) are no longer given spurious trailing markers, while genuinely
+  unclosed emphasis (`**bold`) is still closed.
+- Strikethrough (`~~`) uses the same flanking discipline (`x ~~ y` is left
+  alone).
+- LaTeX currency fix: with `latexEnabled`, `costs $5 today` is no longer
+  mis-paired into inline math; a `$` opens math only when followed by
+  non-whitespace, non-digit.
+- **GFM table repair**: an incomplete trailing table row is hidden from the
+  projection until it completes, instead of rendering as a broken table.
+
+### Accessibility & tooling
+
+- All 8 cursors are wrapped in `ExcludeSemantics` and accept an optional
+  `semanticLabel` (e.g. `'Assistant is typing'`) for a single announced node.
+- New `onTextChanged` callback on `MarkdownStream` reports the current
+  projected text each frame (drive auto-scroll triggers or counters without a
+  controller).
+- Bumped `flutter_lints` to `^5.0.0`.
+
 ## 0.4.0
 
 - **Re-exported transitive types**: `flutter_markdown_stream` now re-exports

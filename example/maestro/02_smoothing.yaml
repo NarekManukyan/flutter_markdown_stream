@@ -1,0 +1,14 @@
+appId: ${APP_ID}
+name: 02 smoothing - paced reveal completes
+tags:
+  - regression
+---
+- launchApp:
+    clearState: true
+- tapOn: "Smoothing"
+- tapOn: "Start"
+- extendedWaitUntil:
+    visible: "MRK_STATUS_DONE"
+    timeout: 20000
+- assertVisible: "Streaming complete."
+- takeScreenshot: "02_smoothing_done"

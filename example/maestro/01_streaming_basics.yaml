@@ -1,0 +1,15 @@
+appId: ${APP_ID}
+name: 01 streaming basics - renders to completion
+tags:
+  - regression
+---
+- launchApp:
+    clearState: true
+- tapOn: "Streaming basics"
+- assertVisible: "MRK_STATUS_IDLE"
+- tapOn: "Start"
+- extendedWaitUntil:
+    visible: "MRK_STATUS_DONE"
+    timeout: 15000
+- assertVisible: "Streaming complete."
+- takeScreenshot: "01_streaming_done"

@@ -15,7 +15,8 @@ void main() {
         home: Scaffold(
           body: MarkdownStream(
             stream: controller.stream,
-            rebuildDebounce: Duration.zero,
+            wordFadeIn: false,
+            config: const StreamingTextConfig(rebuildDebounce: Duration.zero),
           ),
         ),
       ),
@@ -45,7 +46,8 @@ void main() {
           body: MarkdownStream(
             stream: controller.stream,
             textDirection: TextDirection.rtl,
-            rebuildDebounce: Duration.zero,
+            wordFadeIn: false,
+            config: const StreamingTextConfig(rebuildDebounce: Duration.zero),
           ),
         ),
       ),
@@ -81,7 +83,8 @@ void main() {
           body: MarkdownStream(
             stream: controller.stream,
             textDirection: TextDirection.rtl,
-            rebuildDebounce: Duration.zero,
+            wordFadeIn: false,
+            config: const StreamingTextConfig(rebuildDebounce: Duration.zero),
           ),
         ),
       ),
@@ -125,7 +128,8 @@ void main() {
                 width: 2,
                 height: 10,
               ),
-              rebuildDebounce: Duration.zero,
+              wordFadeIn: false,
+            config: const StreamingTextConfig(rebuildDebounce: Duration.zero),
             ),
           ),
         ),
@@ -169,7 +173,8 @@ void main() {
           body: MarkdownStream(
             stream: controller.stream,
             textDirection: TextDirection.ltr,
-            rebuildDebounce: Duration.zero,
+            wordFadeIn: false,
+            config: const StreamingTextConfig(rebuildDebounce: Duration.zero),
           ),
         ),
       ),
