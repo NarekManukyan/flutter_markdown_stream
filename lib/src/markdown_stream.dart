@@ -4,8 +4,11 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:markdown/markdown.dart' as md;
 
+import 'incremental_markdown_body.dart';
 import 'latex_syntax.dart';
+import 'output_smoother.dart';
 import 'safe_markdown_parser.dart';
+import 'word_fade.dart';
 import 'streaming_config.dart';
 import 'streaming_text_controller.dart';
 
@@ -93,6 +96,7 @@ class MarkdownStream<T> extends StatefulWidget {
     this.chunkToText,
     // --- stream-specific ---
     this.onDone,
+    this.onTextChanged,
     this.cursorWidget,
     this.rebuildDebounce = const Duration(milliseconds: 16),
     this.codeBuilder,
@@ -101,6 +105,9 @@ class MarkdownStream<T> extends StatefulWidget {
     this.streamFactory,
     this.latexBuilder,
     this.textDirection,
+    this.incrementalParsing = false,
+    this.wordFadeIn = true,
+    this.wordFadeWindow = 4,
     // --- MarkdownBody pass-through ---
     this.styleSheet,
     this.styleSheetTheme,
@@ -141,6 +148,17 @@ class MarkdownStream<T> extends StatefulWidget {
   /// text.
   final MarkdownStreamDoneCallback? onDone;
 
+  /// Called on every rendered-text change with the current *projected*
+  /// (sanitized, and when smoothing is enabled, paced) text — the exact
+  /// string handed to the underlying `MarkdownBody` that frame.
+  ///
+  /// Fires on each debounced batch (or each smoothing tick), plus once more
+  /// with the final text on completion. Useful for driving an auto-scroll
+  /// trigger, a live token/character counter, or telemetry without attaching
+  /// a full [StreamingTextController]. Keep the callback cheap — it runs in
+  /// the render hot path.
+  final MarkdownStreamDoneCallback? onTextChanged;
+
   /// Optional widget appended to the end of the rendered Markdown while
   /// the stream is still open. A typical choice is `BlinkingCursor()`.
   final Widget? cursorWidget;
@@ -150,6 +168,11 @@ class MarkdownStream<T> extends StatefulWidget {
   /// Set to [Duration.zero] to rebuild on every chunk (useful for tests).
   ///
   /// Overridden by [config]`.rebuildDebounce` when both are provided.
+  ///
+  /// **Inert while smoothing is active.** Since smoothing is on by default
+  /// (see [config]), the smoother's own tick drives cadence and this value is
+  /// ignored. It only takes effect when smoothing is disabled, e.g.
+  /// `config: StreamingPresets.instant` or `StreamingTextConfig(smoothingEnabled: false)`.
   final Duration rebuildDebounce;
 
   /// Optional convenience builder for fenced (block) code only.
@@ -180,6 +203,29 @@ class MarkdownStream<T> extends StatefulWidget {
   /// Forces a specific text direction. When `null`, inherits from the
   /// ambient [Directionality].
   final TextDirection? textDirection;
+
+  /// When `true`, already-settled Markdown blocks are parsed once and reused
+  /// instead of re-parsed on every streaming frame (see
+  /// [IncrementalMarkdownBody]). This keeps per-frame cost proportional to the
+  /// active block rather than the whole response, which matters for long
+  /// answers. Defaults to `false`; the settled output renders identically
+  /// either way, so this is a pure performance switch.
+  final bool incrementalParsing;
+
+  /// When `true`, the words in the paragraph currently being streamed fade in
+  /// (opacity only) as they arrive — the calm, per-word effect used by
+  /// ChatGPT / Claude. Settled blocks render at full opacity through the
+  /// normal `MarkdownBody`; only the active paragraph fades, and everything is
+  /// fully opaque once the stream completes. Implies incremental rendering.
+  ///
+  /// The fade applies to plain prose paragraphs (with inline bold/italic/code/
+  /// links); code blocks, tables, lists, headings, and blockquotes stream
+  /// without a fade. Defaults to `true` — pass `false` for instant text.
+  final bool wordFadeIn;
+
+  /// How many trailing words are graded from dim to opaque when [wordFadeIn]
+  /// is enabled. Larger values give a longer, softer fade. Defaults to 4.
+  final int wordFadeWindow;
 
   // ----- MarkdownBody pass-through -------------------------------------------
 
@@ -277,12 +323,29 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
   bool _pendingRender = false;
   bool _paused = false;
 
+  /// Paces the raw buffer into a steadily-revealed prefix when
+  /// [StreamingTextConfig.smoothingEnabled] is set. `null` when smoothing is
+  /// off (the default), in which case the debounce path is used instead.
+  OutputSmoother? _smoother;
+  StreamSubscription<String>? _smoothSub;
+
   StreamingTextController? get _controller => widget.controller;
+
+  /// When no [StreamingTextConfig] is supplied, the package defaults to a
+  /// smooth (paced) feel. An explicit config always wins — including one with
+  /// `smoothingEnabled: false` to opt back out.
+  static const StreamingTextConfig _kDefaultConfig =
+      StreamingTextConfig(smoothingEnabled: true, charsPerSecond: 120);
+
+  StreamingTextConfig get _effectiveConfig => widget.config ?? _kDefaultConfig;
+
+  bool get _smoothing => _effectiveConfig.smoothingEnabled;
 
   @override
   void initState() {
     super.initState();
     _attachController(widget.controller);
+    _setupSmoother();
     _subscribe(widget.stream);
   }
 
@@ -296,6 +359,7 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
     if (oldWidget.stream != widget.stream) {
       _sub?.cancel();
       _debounceTimer?.cancel();
+      _teardownSmoother();
       _raw.clear();
       _pendingRender = false;
       _paused = false;
@@ -309,8 +373,31 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
           if (mounted && _controller == c) c.internalReset();
         });
       }
+      _setupSmoother();
       _subscribe(widget.stream);
+    } else if (_smoothingConfigChanged(oldWidget)) {
+      // Smoothing was toggled (or its rate changed) without a stream swap.
+      // Rebuild the smoother against the live buffer so the change takes
+      // effect immediately without losing already-received text.
+      _teardownSmoother();
+      _setupSmoother();
+      if (!_state.value.isDone && !_paused) {
+        if (_smoothing) {
+          _smoother?.push(_raw.toString());
+        } else {
+          _renderNow();
+        }
+      }
     }
+  }
+
+  bool _smoothingConfigChanged(MarkdownStream<T> oldWidget) {
+    final a = oldWidget.config;
+    final b = widget.config;
+    return (a?.smoothingEnabled ?? false) != (b?.smoothingEnabled ?? false) ||
+        (a?.charsPerSecond ?? 0) != (b?.charsPerSecond ?? 0) ||
+        (a?.smoothingMaxBacklogChars ?? 0) !=
+            (b?.smoothingMaxBacklogChars ?? 0);
   }
 
   // --- controller plumbing ---------------------------------------------------
@@ -358,13 +445,19 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
     if (!_paused) return;
     _paused = false;
     _controller?.internalSetState(StreamingState.streaming);
-    _renderNow();
+    if (_smoothing) {
+      // Feed the latest buffer so paced reveal picks up where it left off.
+      _smoother?.push(_raw.toString());
+    } else {
+      _renderNow();
+    }
   }
 
   void _handleSkipToEnd() {
     if (_state.value.isDone) return;
     _sub?.cancel();
     _debounceTimer?.cancel();
+    _teardownSmoother();
     _paused = false;
     _renderNow(done: true);
     widget.onDone?.call(_raw.toString());
@@ -375,6 +468,7 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
     if (_state.value.isDone) return;
     _sub?.cancel();
     _debounceTimer?.cancel();
+    _teardownSmoother();
     _paused = false;
     // Keep the currently-rendered text; just mark it as done so the cursor
     // disappears. Do NOT fire onDone — this is an explicit user-cancel.
@@ -392,12 +486,46 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
     }
     _sub?.cancel();
     _debounceTimer?.cancel();
+    _teardownSmoother();
     _raw.clear();
     _pendingRender = false;
     _paused = false;
     _state.value = const _RenderState(text: '', isDone: false);
     _controller?.internalReset();
+    _setupSmoother();
     _subscribe(factory());
+  }
+
+  // --- smoothing plumbing ----------------------------------------------------
+
+  void _setupSmoother() {
+    if (!_smoothing) return;
+    final cfg = _effectiveConfig;
+    final mult = _controller?.speedMultiplier ?? 1.0;
+    final cps = cfg.charsPerSecond * (mult <= 0 ? 1.0 : mult);
+    final s = OutputSmoother(
+      charsPerSecond: cps <= 0 ? 1.0 : cps,
+      maxBacklogChars: cfg.smoothingMaxBacklogChars,
+    );
+    _smoother = s;
+    _smoothSub = s.revealed.listen(_onRevealed);
+  }
+
+  void _teardownSmoother() {
+    _smoothSub?.cancel();
+    _smoothSub = null;
+    _smoother?.dispose();
+    _smoother = null;
+  }
+
+  /// Called for each paced prefix of the *raw* buffer. We sanitize the
+  /// revealed prefix (never the full buffer) so partial syntax inside the
+  /// slice is still repaired, then emit it.
+  void _onRevealed(String rawPrefix) {
+    if (!mounted || _paused || _state.value.isDone) return;
+    final latex = widget.latexBuilder != null;
+    final text = SafeMarkdownParser.sanitize(rawPrefix, latexEnabled: latex);
+    _emitText(text, done: false);
   }
 
   // --- stream lifecycle ------------------------------------------------------
@@ -435,11 +563,21 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
       }
     }
     if (_paused) return;
-    _scheduleRender();
+    if (_smoothing) {
+      _smoother?.push(_raw.toString());
+    } else {
+      _scheduleRender();
+    }
   }
 
   void _onStreamDone() {
     _debounceTimer?.cancel();
+    // Intentional: on completion we snap straight to the full text rather than
+    // letting the smoother drain its backlog over `finishDuration`. Once the
+    // stream is done the reader wants the whole answer immediately, not a few
+    // more seconds of paced reveal. Tearing the smoother down first also stops
+    // a late tick from overwriting the final, fully-rendered text.
+    _teardownSmoother();
     _renderNow(done: true);
     widget.onDone?.call(_raw.toString());
     _controller?.internalSetState(StreamingState.completed);
@@ -452,6 +590,8 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
 
   Duration get _effectiveDebounce {
     final base = widget.config?.rebuildDebounce ?? widget.rebuildDebounce;
+    // Note: when smoothing is active the smoother's own tick drives cadence;
+    // this debounce only applies to the non-smoothing path.
     final mult = _controller?.speedMultiplier ?? 1.0;
     if (mult == 1.0) return base;
     final us = (base.inMicroseconds / mult).round();
@@ -475,15 +615,24 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
     if (!mounted) return;
     final raw = _raw.toString();
     final latex = widget.latexBuilder != null;
-    final nextText = done ? raw : SafeMarkdownParser.sanitize(raw, latexEnabled: latex);
-    _state.value = _state.value.copyWith(text: nextText, isDone: done);
-    _controller?.internalSetCurrentText(nextText);
+    final nextText =
+        done ? raw : SafeMarkdownParser.sanitize(raw, latexEnabled: latex);
+    _emitText(nextText, done: done);
+  }
+
+  /// Single funnel for every render-text update: pushes the new state, mirrors
+  /// it onto the controller, and fires [MarkdownStream.onTextChanged].
+  void _emitText(String text, {required bool done}) {
+    _state.value = _state.value.copyWith(text: text, isDone: done);
+    _controller?.internalSetCurrentText(text);
+    widget.onTextChanged?.call(text);
   }
 
   @override
   void dispose() {
     _debounceTimer?.cancel();
     _sub?.cancel();
+    _teardownSmoother();
     _detachController(widget.controller);
     _state.dispose();
     super.dispose();
@@ -530,6 +679,10 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
         valueListenable: _state,
         builder: (context, state, _) => _MarkdownBodyWithCursor(
           state: state,
+          incrementalParsing: widget.incrementalParsing,
+          wordFadeIn: widget.wordFadeIn,
+          wordFadeWindow: widget.wordFadeWindow,
+          textDirection: widget.textDirection,
           styleSheet: widget.styleSheet,
           styleSheetTheme: widget.styleSheetTheme,
           syntaxHighlighter: widget.syntaxHighlighter,
@@ -574,6 +727,10 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
 class _MarkdownBodyWithCursor extends StatefulWidget {
   const _MarkdownBodyWithCursor({
     required this.state,
+    required this.incrementalParsing,
+    required this.wordFadeIn,
+    required this.wordFadeWindow,
+    required this.textDirection,
     required this.styleSheet,
     required this.styleSheetTheme,
     required this.syntaxHighlighter,
@@ -601,6 +758,10 @@ class _MarkdownBodyWithCursor extends StatefulWidget {
   });
 
   final _RenderState state;
+  final bool incrementalParsing;
+  final bool wordFadeIn;
+  final int wordFadeWindow;
+  final TextDirection? textDirection;
   final MarkdownStyleSheet? styleSheet;
   final MarkdownStyleSheetBaseTheme? styleSheetTheme;
   final SyntaxHighlighter? syntaxHighlighter;
@@ -708,30 +869,66 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
     );
   }
 
+  /// Builds a `MarkdownBody` for [data] with the current styling. Used both
+  /// for the whole text and, under incremental parsing, for each slice.
+  Widget _buildBody(String data) => MarkdownBody(
+        data: data,
+        selectable: widget.selectable,
+        styleSheet: widget.styleSheet,
+        styleSheetTheme: widget.styleSheetTheme,
+        syntaxHighlighter: widget.syntaxHighlighter,
+        onTapLink: widget.onTapLink,
+        onTapText: widget.onTapText,
+        imageDirectory: widget.imageDirectory,
+        blockSyntaxes: widget.blockSyntaxes,
+        inlineSyntaxes: widget.inlineSyntaxes,
+        extensionSet: widget.extensionSet,
+        imageBuilder: widget.imageBuilder,
+        checkboxBuilder: widget.checkboxBuilder,
+        bulletBuilder: widget.bulletBuilder,
+        builders: widget.builders,
+        paddingBuilders: widget.paddingBuilders,
+        listItemCrossAxisAlignment: widget.listItemCrossAxisAlignment,
+        fitContent: widget.fitContent,
+        shrinkWrap: widget.shrinkWrap,
+        softLineBreak: widget.softLineBreak,
+      );
+
+  /// Builds the active (streaming) paragraph with a per-word fade when it is a
+  /// plain paragraph; otherwise falls back to a normal MarkdownBody.
+  Widget _buildFadingTail(BuildContext context, String data) {
+    if (!WordFadeText.isSimpleParagraph(data)) return _buildBody(data);
+    final base = widget.styleSheet?.p ?? DefaultTextStyle.of(context).style;
+    return WordFadeText(
+      text: data,
+      baseStyle: base,
+      isDone: widget.state.isDone,
+      textDirection: widget.textDirection,
+      fadeWindow: widget.wordFadeWindow,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final body = MarkdownBody(
-      data: widget.state.text,
-      selectable: widget.selectable,
-      styleSheet: widget.styleSheet,
-      styleSheetTheme: widget.styleSheetTheme,
-      syntaxHighlighter: widget.syntaxHighlighter,
-      onTapLink: widget.onTapLink,
-      onTapText: widget.onTapText,
-      imageDirectory: widget.imageDirectory,
-      blockSyntaxes: widget.blockSyntaxes,
-      inlineSyntaxes: widget.inlineSyntaxes,
-      extensionSet: widget.extensionSet,
-      imageBuilder: widget.imageBuilder,
-      checkboxBuilder: widget.checkboxBuilder,
-      bulletBuilder: widget.bulletBuilder,
-      builders: widget.builders,
-      paddingBuilders: widget.paddingBuilders,
-      listItemCrossAxisAlignment: widget.listItemCrossAxisAlignment,
-      fitContent: widget.fitContent,
-      shrinkWrap: widget.shrinkWrap,
-      softLineBreak: widget.softLineBreak,
-    );
+    final streaming = !widget.state.isDone;
+    final Widget body;
+    if (widget.wordFadeIn && streaming) {
+      // Settled blocks at full opacity; the active paragraph fades per word.
+      body = IncrementalMarkdownBody(
+        data: widget.state.text,
+        sliceBuilder: _buildBody,
+        tailBuilder: (data) => _buildFadingTail(context, data),
+      );
+    } else if (widget.incrementalParsing && streaming) {
+      // Incremental parsing only pays off while streaming; once done we render
+      // the whole thing once through a single MarkdownBody.
+      body = IncrementalMarkdownBody(
+        data: widget.state.text,
+        sliceBuilder: _buildBody,
+      );
+    } else {
+      body = _buildBody(widget.state.text);
+    }
     final faded = _applyFade(body);
     if (widget.state.isDone || widget.cursorWidget == null) {
       return faded;

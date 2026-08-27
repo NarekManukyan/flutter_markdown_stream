@@ -20,7 +20,8 @@ void main() {
           body: MarkdownStream(
             stream: controller.stream,
             onDone: (text) => done = text,
-            rebuildDebounce: Duration.zero,
+            wordFadeIn: false,
+            config: const StreamingTextConfig(rebuildDebounce: Duration.zero),
           ),
         ),
       ),
@@ -52,7 +53,8 @@ void main() {
           body: MarkdownStream(
             stream: controller.stream,
             cursorWidget: const SizedBox(key: cursorKey, width: 1, height: 1),
-            rebuildDebounce: Duration.zero,
+            wordFadeIn: false,
+            config: const StreamingTextConfig(rebuildDebounce: Duration.zero),
           ),
         ),
       ),
@@ -77,7 +79,7 @@ void main() {
 
     Widget build(Stream<String> s) => MaterialApp(
           home: Scaffold(
-            body: MarkdownStream(stream: s, rebuildDebounce: Duration.zero),
+            body: MarkdownStream(stream: s, wordFadeIn: false, config: const StreamingTextConfig(rebuildDebounce: Duration.zero)),
           ),
         );
 
@@ -115,7 +117,8 @@ void main() {
             stream: controller.stream,
             chunkToText: (c) => c.delta,
             onDone: (text) => done = text,
-            rebuildDebounce: Duration.zero,
+            wordFadeIn: false,
+            config: const StreamingTextConfig(rebuildDebounce: Duration.zero),
           ),
         ),
       ),
@@ -138,7 +141,8 @@ void main() {
         home: Scaffold(
           body: MarkdownStream(
             stream: controller.stream,
-            rebuildDebounce: Duration.zero,
+            wordFadeIn: false,
+            config: const StreamingTextConfig(rebuildDebounce: Duration.zero),
           ),
         ),
       ),

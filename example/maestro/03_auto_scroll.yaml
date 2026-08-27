@@ -1,0 +1,21 @@
+appId: ${APP_ID}
+name: 03 auto scroll - follows content to the bottom
+tags:
+  - regression
+---
+- launchApp:
+    clearState: true
+- tapOn: "Auto scroll"
+- tapOn: "Start"
+- extendedWaitUntil:
+    visible: "MRK_STATUS_DONE"
+    timeout: 40000
+# The final line is only visible if auto-scroll followed the growing content
+# down to the bottom (allow a moment for the last follow to settle)...
+- extendedWaitUntil:
+    visible: "MRK_TAIL_REACHED"
+    timeout: 5000
+# ...and the FIRST line must have scrolled off the top — proof the view
+# actually moved, not just that everything happened to fit.
+- assertNotVisible: "MRK_TOP_START"
+- takeScreenshot: "03_autoscroll_tail"

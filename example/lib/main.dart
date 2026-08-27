@@ -5,6 +5,12 @@ import 'package:flutter_markdown_stream/flutter_markdown_stream.dart';
 
 void main() => runApp(const ExampleApp());
 
+/// Demo app for `flutter_markdown_stream`.
+///
+/// The screens double as an end-to-end test surface: every screen exposes
+/// stable, distinctive `Text` markers (prefixed `MRK_`) and buttons with fixed
+/// labels so a Maestro flow can drive and assert against them deterministically
+/// without depending on Flutter's rich-text semantics.
 class ExampleApp extends StatelessWidget {
   const ExampleApp({super.key});
 
@@ -12,534 +18,343 @@ class ExampleApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'flutter_markdown_stream example',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
       ),
-      home: const _HomePage(),
+      home: const HomeScreen(),
     );
   }
 }
 
-class _HomePage extends StatefulWidget {
-  const _HomePage();
+/// The markdown a demo stream emits, split into small chunks to mimic an LLM
+/// token stream. Contains a heading, prose, a list, and a fenced code block.
+const List<String> _demoChunks = <String>[
+  '# Maestro ',
+  'Streaming ',
+  'Demo\n\n',
+  'The quick ',
+  'brown fox ',
+  '**jumps** over ',
+  'the lazy dog.\n\n',
+  '- one\n- two\n- three\n\n',
+  'Here is code:\n\n',
+  '```dart\n',
+  "void main() => print('maestro');\n",
+  '```\n\n',
+  'Streaming complete.',
+];
 
-  @override
-  State<_HomePage> createState() => _HomePageState();
+/// A very long markdown body used by the auto-scroll demo so the content
+/// clearly overflows the viewport by many screens — following-to-bottom is
+/// then obvious, and the first line genuinely scrolls off the top.
+///
+/// `MRK_TOP_START` and `MRK_TAIL_REACHED` are their own paragraphs so a test
+/// can assert the top has scrolled away while the tail is reached.
+List<String> _longChunks() => <String>[
+  'MRK_TOP_START\n\n',
+  '# Long Answer\n\n',
+  for (var i = 1; i <= 60; i++)
+    'Paragraph number $i. Lorem ipsum dolor sit amet, consectetur adipiscing '
+        'elit, sed do eiusmod tempor incididunt ut labore et dolore magna '
+        'aliqua. Ut enim ad minim veniam, quis nostrud exercitation.\n\n',
+  'MRK_TAIL_REACHED',
+];
+
+Stream<String> _emit(List<String> chunks, {Duration gap = const Duration(milliseconds: 90)}) async* {
+  for (final c in chunks) {
+    await Future<void>.delayed(gap);
+    yield c;
+  }
 }
 
-class _HomePageState extends State<_HomePage>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tab = TabController(length: 3, vsync: this);
+/// The default "smooth" feel: paces bursty tokens into an even flow. The
+/// bottom-edge (per-line) fade is intentionally left OFF here.
+const StreamingTextConfig _smoothConfig = StreamingTextConfig(
+  smoothingEnabled: true,
+  charsPerSecond: 130,
+);
 
-  @override
-  void dispose() {
-    _tab.dispose();
-    super.dispose();
-  }
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final items = <(String, Widget)>[
+      ('Streaming basics', const StreamingBasicsScreen()),
+      ('Smoothing', const SmoothingScreen()),
+      ('Auto scroll', const AutoScrollScreen()),
+      ('Code block', const CodeBlockScreen()),
+      ('Cursors', const CursorsScreen()),
+    ];
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('flutter_markdown_stream'),
-        bottom: TabBar(
-          controller: _tab,
-          tabs: const [
-            Tab(text: 'Playback'),
-            Tab(text: 'Cursors'),
-            Tab(text: 'LaTeX + RTL'),
-          ],
-        ),
-      ),
-      body: TabBarView(
-        controller: _tab,
-        children: const [
-          _PlaybackDemo(),
-          _CursorGallery(),
-          _LatexAndRtlDemo(),
+      appBar: AppBar(title: const Text('Markdown Stream Demo')),
+      body: ListView(
+        children: [
+          for (final (label, screen) in items)
+            ListTile(
+              title: Text(label),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => screen),
+              ),
+            ),
         ],
       ),
     );
   }
 }
 
-// -----------------------------------------------------------------------------
-// Cursor styles (enum-based so DropdownButton equality behaves predictably).
-// -----------------------------------------------------------------------------
+/// Shared status line + start button used by the streaming demos.
+class _StreamScaffold extends StatefulWidget {
+  const _StreamScaffold({
+    required this.title,
+    required this.buildStream,
+    this.config,
+    this.incremental = false,
+    this.codeBuilder,
+  });
 
-enum _CursorStyle {
-  blinking('Blinking'),
-  bar('Bar'),
-  fading('Fading'),
-  pulsing('Pulsing'),
-  typingDots('Typing dots'),
-  waveDots('Wave dots'),
-  spinner('Spinner'),
-  shimmer('Shimmer');
-
-  const _CursorStyle(this.label);
-  final String label;
-
-  Widget build() => switch (this) {
-        _CursorStyle.blinking => const BlinkingCursor(),
-        _CursorStyle.bar => const BarCursor(),
-        _CursorStyle.fading => const FadingCursor(),
-        _CursorStyle.pulsing => const PulsingCursor(),
-        _CursorStyle.typingDots => const TypingDotsCursor(),
-        _CursorStyle.waveDots => const WaveDotsCursor(),
-        _CursorStyle.spinner => const SpinnerCursor(),
-        _CursorStyle.shimmer => const ShimmerCursor(),
-      };
-}
-
-// -----------------------------------------------------------------------------
-// Preset picker
-// -----------------------------------------------------------------------------
-
-enum _Preset {
-  chatGPT('ChatGPT (fast + fade)'),
-  claude('Claude (smooth + fade)'),
-  typewriter('Typewriter'),
-  gentle('Gentle'),
-  fast('Fast'),
-  instant('Instant');
-
-  const _Preset(this.label);
-  final String label;
-
-  StreamingTextConfig get config => switch (this) {
-        _Preset.chatGPT => StreamingPresets.chatGPT,
-        _Preset.claude => StreamingPresets.claude,
-        _Preset.typewriter => StreamingPresets.typewriter,
-        _Preset.gentle => StreamingPresets.gentle,
-        _Preset.fast => StreamingPresets.fast,
-        _Preset.instant => StreamingPresets.instant,
-      };
-}
-
-// -----------------------------------------------------------------------------
-// Playback demo — showcases StreamingTextController + presets + fade
-// -----------------------------------------------------------------------------
-
-class _PlaybackDemo extends StatefulWidget {
-  const _PlaybackDemo();
+  final String title;
+  final List<String> Function() buildStream;
+  final StreamingTextConfig? config;
+  final bool incremental;
+  final CodeBlockBuilder? codeBuilder;
 
   @override
-  State<_PlaybackDemo> createState() => _PlaybackDemoState();
+  State<_StreamScaffold> createState() => _StreamScaffoldState();
 }
 
-class _PlaybackDemoState extends State<_PlaybackDemo> {
-  final StreamingTextController _controller = StreamingTextController();
+class _StreamScaffoldState extends State<_StreamScaffold> {
+  final StickToBottomController _stick = StickToBottomController();
   Stream<String>? _stream;
-  int _runId = 0;
-  _CursorStyle _style = _CursorStyle.blinking;
-  _Preset _preset = _Preset.chatGPT;
-  double _speed = 1;
-
-  static const _sample = '''
-# Streaming Markdown demo
-
-This whole document is streaming in token-by-token. Try **Pause**, **Resume**,
-**Skip to end**, and **Restart** in the toolbar above.
-
-## Features on display
-
-- `StreamingTextController` — pause/resume/skip/restart/stop
-- `StreamingPresets` — ChatGPT-style, Claude-style, typewriter, …
-- **Trailing-fade effect** — the bottom of the text fades softly while
-  streaming and animates away when done
-- Speed multiplier — drag the slider to compress or stretch the debounce
-
-## Code block
-
-```dart
-void main() {
-  print('Hello, stream!');
-  for (var i = 0; i < 3; i++) {
-    print('tick \$i');
-  }
-}
-```
-
-## Links and emphasis
-
-- first item
-- second item with [a link](https://pub.dev)
-- third item with ~~strikethrough~~
-
-That's all, folks!
-''';
+  String _status = 'IDLE';
 
   @override
   void dispose() {
-    _controller.dispose();
+    _stick.dispose();
     super.dispose();
-  }
-
-  Stream<String> _buildStream() {
-    final id = ++_runId;
-    final ctl = StreamController<String>();
-    Future<void> pump() async {
-      final rand = DateTime.now().microsecondsSinceEpoch;
-      var i = 0;
-      while (i < _sample.length) {
-        if (id != _runId) return;
-        final step = 1 + (rand + i) % 3;
-        final end = (i + step).clamp(0, _sample.length);
-        ctl.add(_sample.substring(i, end));
-        i = end;
-        await Future<void>.delayed(const Duration(milliseconds: 25));
-      }
-      await ctl.close();
-    }
-
-    unawaited(pump());
-    return ctl.stream;
   }
 
   void _start() {
     setState(() {
-      _stream = _buildStream();
+      _status = 'STREAMING';
+      _stream = _emit(widget.buildStream());
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Listenable-scoped rebuild: only the control bar and status pill
-          // rebuild when the controller state changes — not the stream view.
-          ListenableBuilder(
-            listenable: _controller,
-            builder: (context, _) {
-              final state = _controller.state;
-              final canPause = state == StreamingState.streaming;
-              final canResume = state == StreamingState.paused;
-              final isActive = _stream != null &&
-                  state != StreamingState.completed &&
-                  state != StreamingState.error;
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      FilledButton.icon(
-                        onPressed: _start,
-                        icon: const Icon(Icons.play_arrow),
-                        label: const Text('Start'),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: canPause ? _controller.pause : null,
-                        icon: const Icon(Icons.pause),
-                        label: const Text('Pause'),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: canResume ? _controller.resume : null,
-                        icon: const Icon(Icons.play_arrow),
-                        label: const Text('Resume'),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: isActive ? _controller.skipToEnd : null,
-                        icon: const Icon(Icons.skip_next),
-                        label: const Text('Skip to end'),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: isActive ? _controller.stop : null,
-                        icon: const Icon(Icons.stop),
-                        label: const Text('Stop'),
-                      ),
-                      DropdownButton<_Preset>(
-                        value: _preset,
-                        items: [
-                          for (final p in _Preset.values)
-                            DropdownMenuItem(value: p, child: Text(p.label)),
-                        ],
-                        onChanged: (v) => setState(() => _preset = v!),
-                      ),
-                      DropdownButton<_CursorStyle>(
-                        value: _style,
-                        items: [
-                          for (final s in _CursorStyle.values)
-                            DropdownMenuItem(value: s, child: Text(s.label)),
-                        ],
-                        onChanged: (v) => setState(() => _style = v!),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      const Text('Speed '),
-                      Expanded(
-                        child: Slider(
-                          value: _speed,
-                          min: 0.25,
-                          max: 4,
-                          divisions: 15,
-                          label: '${_speed.toStringAsFixed(2)}x',
-                          onChanged: (v) {
-                            setState(() => _speed = v);
-                            _controller.speedMultiplier = v;
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text('${_speed.toStringAsFixed(2)}x'),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  _StatusPill(
-                    state: state,
-                    chunks: _controller.chunkCount,
-                  ),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: _stream == null
-                ? const Center(child: Text('Press Start to begin streaming.'))
-                : SingleChildScrollView(
-                    child: MarkdownStream(
-                      stream: _stream!,
-                      controller: _controller,
-                      config: _preset.config,
-                      cursorWidget: _style.build(),
-                      selectable: true,
-                    ),
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatusPill extends StatelessWidget {
-  const _StatusPill({required this.state, required this.chunks});
-  final StreamingState state;
-  final int chunks;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = switch (state) {
-      StreamingState.idle => Colors.grey,
-      StreamingState.streaming => Colors.green,
-      StreamingState.paused => Colors.orange,
-      StreamingState.completed => Colors.blue,
-      StreamingState.error => Colors.red,
-    };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.4)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.circle, size: 10, color: color),
-          const SizedBox(width: 8),
-          Text('${state.name}  •  $chunks chunks'),
-        ],
-      ),
-    );
-  }
-}
-
-// -----------------------------------------------------------------------------
-// Cursor gallery
-// -----------------------------------------------------------------------------
-
-class _CursorGallery extends StatelessWidget {
-  const _CursorGallery();
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: _CursorStyle.values.length,
-      separatorBuilder: (_, __) => const Divider(),
-      itemBuilder: (context, i) {
-        final style = _CursorStyle.values[i];
-        return Row(
+    final stream = _stream;
+    // Default to the smooth (paced + fade) feel; a screen may override it.
+    final config = widget.config ?? _smoothConfig;
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.title)),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(
-              width: 180,
-              child: Text(
-                style.name,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
+            Row(
+              children: [
+                FilledButton(
+                  onPressed: _start,
+                  child: Text(stream == null ? 'Start' : 'Restart'),
+                ),
+                const SizedBox(width: 16),
+                Text('MRK_STATUS_$_status'),
+              ],
             ),
-            SizedBox(
-              height: 40,
-              child: Center(child: style.build()),
+            const Divider(),
+            Expanded(
+              child: stream == null
+                  ? const Text('Press Start to stream.')
+                  // AutoScroll keeps the newest (fading-in) text pinned to the
+                  // bottom edge, so streaming reads as a smooth flow.
+                  : AutoScroll(
+                      controller: _stick,
+                      child: MarkdownStream(
+                        key: ValueKey<int>(stream.hashCode),
+                        stream: stream,
+                        config: config,
+                        incrementalParsing: widget.incremental,
+                        wordFadeIn: true,
+                        // Fill the viewport width so full-width blocks (e.g. the
+                        // code card) align to the message edges.
+                        fitContent: false,
+                        codeBuilder: widget.codeBuilder,
+                        cursorWidget: const BlinkingCursor(
+                          semanticLabel: 'Assistant is typing',
+                        ),
+                        onDone: (_) => setState(() => _status = 'DONE'),
+                      ),
+                    ),
             ),
           ],
-        );
-      },
+        ),
+      ),
     );
   }
 }
 
-// -----------------------------------------------------------------------------
-// LaTeX + RTL demo
-// -----------------------------------------------------------------------------
-//
-// The package adds no dependency on a math renderer. This demo uses a simple
-// placeholder renderer that formats LaTeX expressions distinctly; in a real
-// app you'd plug in a package like `flutter_math_fork` here.
-
-class _LatexAndRtlDemo extends StatefulWidget {
-  const _LatexAndRtlDemo();
-
+class StreamingBasicsScreen extends StatelessWidget {
+  const StreamingBasicsScreen({super.key});
   @override
-  State<_LatexAndRtlDemo> createState() => _LatexAndRtlDemoState();
+  Widget build(BuildContext context) => _StreamScaffold(
+        title: 'Streaming basics',
+        buildStream: () => _demoChunks,
+      );
 }
 
-class _LatexAndRtlDemoState extends State<_LatexAndRtlDemo> {
+class SmoothingScreen extends StatelessWidget {
+  const SmoothingScreen({super.key});
+  @override
+  Widget build(BuildContext context) => _StreamScaffold(
+        title: 'Smoothing',
+        buildStream: () => _demoChunks,
+        config: const StreamingTextConfig(
+          smoothingEnabled: true,
+          charsPerSecond: 90,
+        ),
+      );
+}
+
+class CodeBlockScreen extends StatelessWidget {
+  const CodeBlockScreen({super.key});
+  @override
+  Widget build(BuildContext context) => _StreamScaffold(
+        title: 'Code block',
+        buildStream: () => _demoChunks,
+        incremental: true,
+        codeBuilder: CodeBlockView.builder(highlightBuilder: _demoHighlight),
+      );
+}
+
+/// A tiny, dependency-free highlighter used only to demonstrate
+/// `CodeBlockView.highlightBuilder`. Real apps would plug in a proper
+/// tokenizer such as `package:highlight` / `package:flutter_highlight`.
+InlineSpan _demoHighlight(String code, String language, TextStyle base) {
+  const keywords = <String>{
+    'void', 'main', 'final', 'const', 'class', 'extends', 'return', 'if',
+    'else', 'for', 'while', 'import', 'var', 'true', 'false', 'null', 'new',
+    'async', 'await', 'print',
+  };
+  final keyword =
+      base.copyWith(color: const Color(0xFFB388FF), fontWeight: FontWeight.w600);
+  final string = base.copyWith(color: const Color(0xFF80CBC4));
+  final comment =
+      base.copyWith(color: const Color(0xFF9E9E9E), fontStyle: FontStyle.italic);
+  final number = base.copyWith(color: const Color(0xFFFFB74D));
+  final token = RegExp(
+    r'''//[^\n]*|'[^']*'|"[^"]*"|\b\d+(?:\.\d+)?\b|[A-Za-z_]\w*|\s+|[^\w\s]''',
+  );
+  final spans = <TextSpan>[
+    for (final m in token.allMatches(code))
+      TextSpan(text: m.group(0), style: _styleFor(m.group(0)!, base, keywords,
+          keyword: keyword, string: string, comment: comment, number: number)),
+  ];
+  return TextSpan(children: spans);
+}
+
+TextStyle _styleFor(
+  String t,
+  TextStyle base,
+  Set<String> keywords, {
+  required TextStyle keyword,
+  required TextStyle string,
+  required TextStyle comment,
+  required TextStyle number,
+}) {
+  if (t.startsWith('//')) return comment;
+  if (t.startsWith("'") || t.startsWith('"')) return string;
+  if (RegExp(r'^\d').hasMatch(t)) return number;
+  if (keywords.contains(t)) return keyword;
+  return base;
+}
+
+class CursorsScreen extends StatelessWidget {
+  const CursorsScreen({super.key});
+  @override
+  Widget build(BuildContext context) => _StreamScaffold(
+        title: 'Cursors',
+        buildStream: () => _demoChunks,
+      );
+}
+
+/// Auto-scroll demo: a long stream inside an [AutoScroll]. The final line
+/// (`MRK_TAIL_REACHED`) starts off-screen and only becomes visible if
+/// following-to-bottom works.
+class AutoScrollScreen extends StatefulWidget {
+  const AutoScrollScreen({super.key});
+  @override
+  State<AutoScrollScreen> createState() => _AutoScrollScreenState();
+}
+
+class _AutoScrollScreenState extends State<AutoScrollScreen> {
+  final StickToBottomController _stick = StickToBottomController();
   Stream<String>? _stream;
-  int _runId = 0;
-  bool _rtl = false;
+  String _status = 'IDLE';
 
-  static const _english = r'''
-# Math, streamed safely
-
-Euler's identity: $e^{i\pi} + 1 = 0$ — arguably the most beautiful formula
-in mathematics.
-
-A block expression:
-
-$$
-\int_0^\infty e^{-x^2}\,dx = \frac{\sqrt{\pi}}{2}
-$$
-
-The **LaTeX** delimiters are detected mid-stream, so partially-typed
-`$formula` fragments do not break the layout.
-''';
-
-  static const _arabic = '''
-# عرض باللغة العربية
-
-هذه فقرة تُبثّ حرفاً بحرف من اليمين إلى اليسار. تعمل خصائص **التأكيد**
-و *المائل* بشكل صحيح مع التخطيط العربي.
-
-- عنصر أول
-- عنصر ثانٍ
-- عنصر ثالث
-
-انتهى العرض.
-''';
-
-  void _start() {
-    final id = ++_runId;
-    final ctl = StreamController<String>();
-    final text = _rtl ? _arabic : _english;
-    setState(() => _stream = ctl.stream);
-
-    Future<void> pump() async {
-      var i = 0;
-      while (i < text.length) {
-        if (id != _runId) return;
-        final end = (i + 2).clamp(0, text.length);
-        ctl.add(text.substring(i, end));
-        i = end;
-        await Future<void>.delayed(const Duration(milliseconds: 25));
-      }
-      await ctl.close();
-    }
-
-    unawaited(pump());
+  @override
+  void dispose() {
+    _stick.dispose();
+    super.dispose();
   }
 
-  Widget _renderLatex(String latex, {required bool displayMode}) {
-    final scheme = Theme.of(context).colorScheme;
-    final style = Theme.of(context).textTheme.bodyLarge?.copyWith(
-          fontFamily: 'monospace',
-          color: scheme.primary,
-          fontWeight: FontWeight.w500,
-        );
-    final rendered = displayMode
-        ? Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: scheme.primaryContainer.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(latex, style: style),
-            ),
-          )
-        : Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-            decoration: BoxDecoration(
-              color: scheme.primaryContainer.withValues(alpha: 0.3),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(latex, style: style),
-          );
-    return rendered;
+  void _start() {
+    setState(() {
+      _status = 'STREAMING';
+      _stream = _emit(_longChunks(), gap: const Duration(milliseconds: 60));
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(
-            spacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              FilledButton.icon(
-                onPressed: _start,
-                icon: const Icon(Icons.play_arrow),
-                label: const Text('Stream'),
-              ),
-              FilterChip(
-                label: const Text('RTL (Arabic sample)'),
-                selected: _rtl,
-                onSelected: (v) => setState(() {
-                  _rtl = v;
-                  _stream = null;
-                }),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            _rtl
-                ? 'textDirection: TextDirection.rtl'
-                : 'latexBuilder: inline \$…\$ and block \$\$…\$\$',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: _stream == null
-                ? const Center(child: Text('Press Stream to start.'))
-                : SingleChildScrollView(
-                    child: MarkdownStream(
-                      stream: _stream!,
-                      config: StreamingPresets.claude,
-                      cursorWidget: const BarCursor(),
-                      selectable: true,
-                      latexBuilder: _rtl ? null : _renderLatex,
-                      textDirection: _rtl ? TextDirection.rtl : null,
+    final stream = _stream;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Auto scroll')),
+      floatingActionButton: ValueListenableBuilder<bool>(
+        valueListenable: _stick.showScrollToBottomButtonListenable,
+        builder: (context, show, _) => show
+            ? FloatingActionButton.small(
+                // A user tap animates (smooth); the automatic streaming-follow
+                // jumps (tight). Two different intents, two different calls.
+                onPressed: () => _stick.animateToBottom(),
+                child: const Icon(Icons.arrow_downward),
+              )
+            : const SizedBox.shrink(),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                FilledButton(
+                  onPressed: _start,
+                  child: Text(stream == null ? 'Start' : 'Restart'),
+                ),
+                const SizedBox(width: 16),
+                Text('MRK_STATUS_$_status'),
+              ],
+            ),
+            const Divider(),
+            Expanded(
+              child: stream == null
+                  ? const Text('Press Start to stream.')
+                  : AutoScroll(
+                      controller: _stick,
+                      child: MarkdownStream(
+                        key: ValueKey<int>(stream.hashCode),
+                        stream: stream,
+                        onDone: (_) => setState(() => _status = 'DONE'),
+                      ),
                     ),
-                  ),
-          ),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }

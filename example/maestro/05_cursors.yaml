@@ -1,0 +1,18 @@
+appId: ${APP_ID}
+name: 05 cursors - streams with a typing cursor
+tags:
+  - regression
+---
+- launchApp:
+    clearState: true
+- tapOn: "Cursors"
+- tapOn: "Start"
+# The stream is brief, so the streaming state may already be gone — treat the
+# mid-stream assertion as best-effort and rely on the terminal state.
+- assertVisible:
+    text: "MRK_STATUS_STREAMING"
+    optional: true
+- extendedWaitUntil:
+    visible: "MRK_STATUS_DONE"
+    timeout: 15000
+- takeScreenshot: "05_cursors_done"

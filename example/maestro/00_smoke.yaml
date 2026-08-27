@@ -1,0 +1,14 @@
+appId: ${APP_ID}
+name: 00 smoke - home menu renders
+tags:
+  - smoke
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Markdown Stream Demo"
+- assertVisible: "Streaming basics"
+- assertVisible: "Smoothing"
+- assertVisible: "Auto scroll"
+- assertVisible: "Code block"
+- assertVisible: "Cursors"
+- takeScreenshot: "00_home"

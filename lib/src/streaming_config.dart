@@ -24,7 +24,15 @@ class StreamingTextConfig {
     this.fadeInDuration = const Duration(milliseconds: 300),
     this.fadeInCurve = Curves.easeOut,
     this.trailingFadeHeight = 40,
-  });
+    this.smoothingEnabled = false,
+    this.charsPerSecond = 120,
+    this.smoothingMaxBacklogChars = 400,
+  })  : assert(charsPerSecond > 0, 'charsPerSecond must be positive'),
+        assert(
+          smoothingMaxBacklogChars > 0,
+          'smoothingMaxBacklogChars must be positive',
+        ),
+        assert(trailingFadeHeight >= 0, 'trailingFadeHeight must be >= 0');
 
   /// Minimum time between rebuilds. Bursts of tokens inside a debounce window
   /// produce at most one rebuild. Defaults to one frame (16 ms).
@@ -51,6 +59,24 @@ class StreamingTextConfig {
   /// transparent. Ignored when [fadeInEnabled] is `false`.
   final double trailingFadeHeight;
 
+  /// Whether output is paced by a [OutputSmoother] instead of rendered as
+  /// soon as tokens arrive.
+  ///
+  /// When `true`, incoming tokens fill a buffer that is revealed at a steady
+  /// [charsPerSecond] rate, so bursty network delivery reads as a smooth,
+  /// even flow of text (the "ChatGPT / Claude" feel). When `false` (the
+  /// default), the widget renders each debounced batch immediately.
+  final bool smoothingEnabled;
+
+  /// Target reveal rate, in characters per second, when [smoothingEnabled]
+  /// is `true`. Ignored otherwise.
+  final double charsPerSecond;
+
+  /// Backlog threshold, in characters, past which the smoother accelerates so
+  /// a finished or stalled stream never leaves the UI arbitrarily behind.
+  /// Ignored when [smoothingEnabled] is `false`.
+  final int smoothingMaxBacklogChars;
+
   /// Returns a copy of this config with the given fields replaced.
   StreamingTextConfig copyWith({
     Duration? rebuildDebounce,
@@ -58,6 +84,9 @@ class StreamingTextConfig {
     Duration? fadeInDuration,
     Curve? fadeInCurve,
     double? trailingFadeHeight,
+    bool? smoothingEnabled,
+    double? charsPerSecond,
+    int? smoothingMaxBacklogChars,
   }) =>
       StreamingTextConfig(
         rebuildDebounce: rebuildDebounce ?? this.rebuildDebounce,
@@ -65,6 +94,10 @@ class StreamingTextConfig {
         fadeInDuration: fadeInDuration ?? this.fadeInDuration,
         fadeInCurve: fadeInCurve ?? this.fadeInCurve,
         trailingFadeHeight: trailingFadeHeight ?? this.trailingFadeHeight,
+        smoothingEnabled: smoothingEnabled ?? this.smoothingEnabled,
+        charsPerSecond: charsPerSecond ?? this.charsPerSecond,
+        smoothingMaxBacklogChars:
+            smoothingMaxBacklogChars ?? this.smoothingMaxBacklogChars,
       );
 
   @override
@@ -75,7 +108,10 @@ class StreamingTextConfig {
           other.fadeInEnabled == fadeInEnabled &&
           other.fadeInDuration == fadeInDuration &&
           other.fadeInCurve == fadeInCurve &&
-          other.trailingFadeHeight == trailingFadeHeight);
+          other.trailingFadeHeight == trailingFadeHeight &&
+          other.smoothingEnabled == smoothingEnabled &&
+          other.charsPerSecond == charsPerSecond &&
+          other.smoothingMaxBacklogChars == smoothingMaxBacklogChars);
 
   @override
   int get hashCode => Object.hash(
@@ -84,6 +120,9 @@ class StreamingTextConfig {
         fadeInDuration,
         fadeInCurve,
         trailingFadeHeight,
+        smoothingEnabled,
+        charsPerSecond,
+        smoothingMaxBacklogChars,
       );
 
   @override
@@ -92,7 +131,10 @@ class StreamingTextConfig {
       'fadeInEnabled: $fadeInEnabled, '
       'fadeInDuration: $fadeInDuration, '
       'fadeInCurve: $fadeInCurve, '
-      'trailingFadeHeight: $trailingFadeHeight)';
+      'trailingFadeHeight: $trailingFadeHeight, '
+      'smoothingEnabled: $smoothingEnabled, '
+      'charsPerSecond: $charsPerSecond, '
+      'smoothingMaxBacklogChars: $smoothingMaxBacklogChars)';
 }
 
 /// Named [StreamingTextConfig] presets for common streaming styles.
@@ -107,18 +149,29 @@ class StreamingTextConfig {
 /// ```
 abstract final class StreamingPresets {
   /// Fast, character-level feel with a subtle fade — approximates ChatGPT.
+  ///
+  /// Since 0.5.0 this preset enables [StreamingTextConfig.smoothingEnabled] so
+  /// bursty tokens are paced into an even flow. Opt out with
+  /// `StreamingPresets.chatGPT.copyWith(smoothingEnabled: false)`.
   static const StreamingTextConfig chatGPT = StreamingTextConfig(
     rebuildDebounce: Duration(milliseconds: 15),
     fadeInEnabled: true,
     fadeInDuration: Duration(milliseconds: 200),
+    smoothingEnabled: true,
+    charsPerSecond: 180,
   );
 
   /// Smoother, paced rebuilds with a longer fade — approximates Claude.
+  ///
+  /// Since 0.5.0 this preset enables [StreamingTextConfig.smoothingEnabled].
+  /// Opt out with `StreamingPresets.claude.copyWith(smoothingEnabled: false)`.
   static const StreamingTextConfig claude = StreamingTextConfig(
     rebuildDebounce: Duration(milliseconds: 80),
     fadeInEnabled: true,
     fadeInDuration: Duration(milliseconds: 400),
     fadeInCurve: Curves.easeInOutCubic,
+    smoothingEnabled: true,
+    charsPerSecond: 120,
   );
 
   /// Zero-latency rendering, no fade. Useful for deterministic tests or
@@ -145,5 +198,16 @@ abstract final class StreamingPresets {
     rebuildDebounce: Duration(milliseconds: 30),
     fadeInEnabled: true,
     fadeInDuration: Duration(milliseconds: 150),
+  );
+
+  /// Explicit smoothing preset: paces output at a steady rate regardless of
+  /// how bursty the underlying stream is. Use when you want the paced,
+  /// even-flow feel without tying it to a specific vendor's cadence.
+  static const StreamingTextConfig smooth = StreamingTextConfig(
+    smoothingEnabled: true,
+    charsPerSecond: 140,
+    fadeInEnabled: true,
+    fadeInDuration: Duration(milliseconds: 300),
+    fadeInCurve: Curves.easeOut,
   );
 }

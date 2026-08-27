@@ -1,0 +1,22 @@
+appId: ${APP_ID}
+name: 04 code block - copy button works
+tags:
+  - regression
+---
+- launchApp:
+    clearState: true
+- tapOn: "Code block"
+- tapOn: "Start"
+- extendedWaitUntil:
+    visible: "MRK_STATUS_DONE"
+    timeout: 15000
+# The fenced code block (rendered by CodeBlockView) is below the fold; scroll
+# it into view before interacting with its copy control.
+- scrollUntilVisible:
+    element:
+      text: "Copy"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Copy"
+- assertVisible: "Copied"
+- takeScreenshot: "04_code_copied"

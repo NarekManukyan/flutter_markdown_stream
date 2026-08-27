@@ -16,7 +16,28 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 Color _resolveColor(BuildContext context, Color? explicit) =>
-    explicit ?? DefaultTextStyle.of(context).style.color ?? const Color(0xFF000000);
+    explicit ??
+    DefaultTextStyle.of(context).style.color ??
+    const Color(0xFF000000);
+
+/// Wraps a purely-decorative cursor animation so it does not pollute the
+/// semantics tree.
+///
+/// By default the animation is excluded from the semantics tree entirely —
+/// it is a "generating" indicator, not meaningful content for a screen
+/// reader. If [semanticLabel] is supplied, [child]'s own semantics are
+/// replaced with a single node carrying that label instead (e.g. so a
+/// consumer can announce "Assistant is typing").
+Widget _wrapCursorSemantics(Widget child, String? semanticLabel) {
+  if (semanticLabel != null) {
+    return Semantics(
+      label: semanticLabel,
+      excludeSemantics: true,
+      child: child,
+    );
+  }
+  return ExcludeSemantics(child: child);
+}
 
 // -----------------------------------------------------------------------------
 // BlinkingCursor
@@ -34,6 +55,7 @@ class BlinkingCursor extends StatefulWidget {
     this.width = 8,
     this.height = 16,
     this.period = const Duration(milliseconds: 900),
+    this.semanticLabel,
   });
 
   /// Cursor colour. Defaults to the ambient text colour.
@@ -47,6 +69,11 @@ class BlinkingCursor extends StatefulWidget {
 
   /// Full blink period (on + off).
   final Duration period;
+
+  /// Optional label announced to assistive technology in place of the
+  /// (purely decorative) animation. When `null` (the default), the cursor
+  /// is excluded from the semantics tree entirely.
+  final String? semanticLabel;
 
   @override
   State<BlinkingCursor> createState() => _BlinkingCursorState();
@@ -68,19 +95,22 @@ class _BlinkingCursorState extends State<BlinkingCursor>
   @override
   Widget build(BuildContext context) {
     final color = _resolveColor(context, widget.color);
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (_, __) {
-        // Square wave: on for the first half of the period, off for the second.
-        return Opacity(
-          opacity: _c.value < 0.5 ? 1 : 0,
-          child: Container(
-            width: widget.width,
-            height: widget.height,
-            color: color,
-          ),
-        );
-      },
+    return _wrapCursorSemantics(
+      AnimatedBuilder(
+        animation: _c,
+        builder: (_, __) {
+          // Square wave: on for the first half of the period, off for the second.
+          return Opacity(
+            opacity: _c.value < 0.5 ? 1 : 0,
+            child: Container(
+              width: widget.width,
+              height: widget.height,
+              color: color,
+            ),
+          );
+        },
+      ),
+      widget.semanticLabel,
     );
   }
 }
@@ -98,6 +128,7 @@ class BarCursor extends StatefulWidget {
     this.width = 2,
     this.height = 16,
     this.period = const Duration(milliseconds: 900),
+    this.semanticLabel,
   });
 
   /// Bar colour. Defaults to the ambient text colour.
@@ -111,6 +142,11 @@ class BarCursor extends StatefulWidget {
 
   /// Full blink period (on + off).
   final Duration period;
+
+  /// Optional label announced to assistive technology in place of the
+  /// (purely decorative) animation. When `null` (the default), the cursor
+  /// is excluded from the semantics tree entirely.
+  final String? semanticLabel;
 
   @override
   State<BarCursor> createState() => _BarCursorState();
@@ -132,18 +168,21 @@ class _BarCursorState extends State<BarCursor>
   @override
   Widget build(BuildContext context) {
     final color = _resolveColor(context, widget.color);
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (_, __) {
-        return Opacity(
-          opacity: _c.value < 0.5 ? 1 : 0,
-          child: Container(
-            width: widget.width,
-            height: widget.height,
-            color: color,
-          ),
-        );
-      },
+    return _wrapCursorSemantics(
+      AnimatedBuilder(
+        animation: _c,
+        builder: (_, __) {
+          return Opacity(
+            opacity: _c.value < 0.5 ? 1 : 0,
+            child: Container(
+              width: widget.width,
+              height: widget.height,
+              color: color,
+            ),
+          );
+        },
+      ),
+      widget.semanticLabel,
     );
   }
 }
@@ -162,6 +201,7 @@ class FadingCursor extends StatefulWidget {
     this.width = 8,
     this.height = 16,
     this.period = const Duration(milliseconds: 1200),
+    this.semanticLabel,
   });
 
   /// Cursor colour.
@@ -175,6 +215,11 @@ class FadingCursor extends StatefulWidget {
 
   /// Full fade period (one in-out cycle).
   final Duration period;
+
+  /// Optional label announced to assistive technology in place of the
+  /// (purely decorative) animation. When `null` (the default), the cursor
+  /// is excluded from the semantics tree entirely.
+  final String? semanticLabel;
 
   @override
   State<FadingCursor> createState() => _FadingCursorState();
@@ -196,20 +241,23 @@ class _FadingCursorState extends State<FadingCursor>
   @override
   Widget build(BuildContext context) {
     final color = _resolveColor(context, widget.color);
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (_, __) {
-        // sin curve centred at 0.5 with amplitude 0.5 → [0, 1].
-        final opacity = 0.5 + 0.5 * math.sin(_c.value * 2 * math.pi);
-        return Opacity(
-          opacity: opacity,
-          child: Container(
-            width: widget.width,
-            height: widget.height,
-            color: color,
-          ),
-        );
-      },
+    return _wrapCursorSemantics(
+      AnimatedBuilder(
+        animation: _c,
+        builder: (_, __) {
+          // sin curve centred at 0.5 with amplitude 0.5 → [0, 1].
+          final opacity = 0.5 + 0.5 * math.sin(_c.value * 2 * math.pi);
+          return Opacity(
+            opacity: opacity,
+            child: Container(
+              width: widget.width,
+              height: widget.height,
+              color: color,
+            ),
+          );
+        },
+      ),
+      widget.semanticLabel,
     );
   }
 }
@@ -228,10 +276,11 @@ class PulsingCursor extends StatefulWidget {
     this.period = const Duration(milliseconds: 1200),
     this.minScale = 0.6,
     this.maxScale = 1,
+    this.semanticLabel,
   }) : assert(
-          minScale > 0 && minScale <= maxScale,
-          'minScale must be > 0 and <= maxScale',
-        );
+         minScale > 0 && minScale <= maxScale,
+         'minScale must be > 0 and <= maxScale',
+       );
 
   /// Dot colour.
   final Color? color;
@@ -247,6 +296,11 @@ class PulsingCursor extends StatefulWidget {
 
   /// Scale at the loudest point of the breath.
   final double maxScale;
+
+  /// Optional label announced to assistive technology in place of the
+  /// (purely decorative) animation. When `null` (the default), the cursor
+  /// is excluded from the semantics tree entirely.
+  final String? semanticLabel;
 
   @override
   State<PulsingCursor> createState() => _PulsingCursorState();
@@ -268,23 +322,27 @@ class _PulsingCursorState extends State<PulsingCursor>
   @override
   Widget build(BuildContext context) {
     final color = _resolveColor(context, widget.color);
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (_, __) {
-        final scale = widget.minScale +
-            (widget.maxScale - widget.minScale) *
-                Curves.easeInOut.transform(_c.value);
-        return SizedBox(
-          width: widget.size,
-          height: widget.size,
-          child: Transform.scale(
-            scale: scale,
-            child: Container(
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    return _wrapCursorSemantics(
+      AnimatedBuilder(
+        animation: _c,
+        builder: (_, __) {
+          final scale =
+              widget.minScale +
+              (widget.maxScale - widget.minScale) *
+                  Curves.easeInOut.transform(_c.value);
+          return SizedBox(
+            width: widget.size,
+            height: widget.size,
+            child: Transform.scale(
+              scale: scale,
+              child: Container(
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
+      widget.semanticLabel,
     );
   }
 }
@@ -303,6 +361,7 @@ class TypingDotsCursor extends StatefulWidget {
     this.dotSize = 6,
     this.gap = 4,
     this.period = const Duration(milliseconds: 1200),
+    this.semanticLabel,
   });
 
   /// Dot colour.
@@ -316,6 +375,11 @@ class TypingDotsCursor extends StatefulWidget {
 
   /// Full cycle duration across all three dots.
   final Duration period;
+
+  /// Optional label announced to assistive technology in place of the
+  /// (purely decorative) animation. When `null` (the default), the cursor
+  /// is excluded from the semantics tree entirely.
+  final String? semanticLabel;
 
   @override
   State<TypingDotsCursor> createState() => _TypingDotsCursorState();
@@ -348,27 +412,32 @@ class _TypingDotsCursorState extends State<TypingDotsCursor>
   @override
   Widget build(BuildContext context) {
     final color = _resolveColor(context, widget.color);
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (_, __) {
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: List<Widget>.generate(3, (i) {
-            return Padding(
-              padding: EdgeInsets.only(right: i == 2 ? 0 : widget.gap),
-              child: Opacity(
-                opacity: _dotOpacity(_c.value, i),
-                child: Container(
-                  width: widget.dotSize,
-                  height: widget.dotSize,
-                  decoration:
-                      BoxDecoration(color: color, shape: BoxShape.circle),
+    return _wrapCursorSemantics(
+      AnimatedBuilder(
+        animation: _c,
+        builder: (_, __) {
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: List<Widget>.generate(3, (i) {
+              return Padding(
+                padding: EdgeInsets.only(right: i == 2 ? 0 : widget.gap),
+                child: Opacity(
+                  opacity: _dotOpacity(_c.value, i),
+                  child: Container(
+                    width: widget.dotSize,
+                    height: widget.dotSize,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
                 ),
-              ),
-            );
-          }),
-        );
-      },
+              );
+            }),
+          );
+        },
+      ),
+      widget.semanticLabel,
     );
   }
 }
@@ -387,6 +456,7 @@ class WaveDotsCursor extends StatefulWidget {
     this.gap = 4,
     this.amplitude = 4,
     this.period = const Duration(milliseconds: 900),
+    this.semanticLabel,
   });
 
   /// Dot colour.
@@ -403,6 +473,11 @@ class WaveDotsCursor extends StatefulWidget {
 
   /// Full wave cycle.
   final Duration period;
+
+  /// Optional label announced to assistive technology in place of the
+  /// (purely decorative) animation. When `null` (the default), the cursor
+  /// is excluded from the semantics tree entirely.
+  final String? semanticLabel;
 
   @override
   State<WaveDotsCursor> createState() => _WaveDotsCursorState();
@@ -432,31 +507,36 @@ class _WaveDotsCursorState extends State<WaveDotsCursor>
   Widget build(BuildContext context) {
     final color = _resolveColor(context, widget.color);
     final totalHeight = widget.dotSize + 2 * widget.amplitude;
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (_, __) {
-        return SizedBox(
-          height: totalHeight,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: List<Widget>.generate(3, (i) {
-              return Padding(
-                padding: EdgeInsets.only(right: i == 2 ? 0 : widget.gap),
-                child: Transform.translate(
-                  offset: Offset(0, _dy(_c.value, i)),
-                  child: Container(
-                    width: widget.dotSize,
-                    height: widget.dotSize,
-                    decoration:
-                        BoxDecoration(color: color, shape: BoxShape.circle),
+    return _wrapCursorSemantics(
+      AnimatedBuilder(
+        animation: _c,
+        builder: (_, __) {
+          return SizedBox(
+            height: totalHeight,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: List<Widget>.generate(3, (i) {
+                return Padding(
+                  padding: EdgeInsets.only(right: i == 2 ? 0 : widget.gap),
+                  child: Transform.translate(
+                    offset: Offset(0, _dy(_c.value, i)),
+                    child: Container(
+                      width: widget.dotSize,
+                      height: widget.dotSize,
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
                   ),
-                ),
-              );
-            }),
-          ),
-        );
-      },
+                );
+              }),
+            ),
+          );
+        },
+      ),
+      widget.semanticLabel,
     );
   }
 }
@@ -474,6 +554,7 @@ class SpinnerCursor extends StatelessWidget {
     this.color,
     this.size = 14,
     this.strokeWidth = 2,
+    this.semanticLabel,
   });
 
   /// Spinner colour.
@@ -485,16 +566,24 @@ class SpinnerCursor extends StatelessWidget {
   /// Stroke width in logical pixels.
   final double strokeWidth;
 
+  /// Optional label announced to assistive technology in place of the
+  /// (purely decorative) animation. When `null` (the default), the cursor
+  /// is excluded from the semantics tree entirely.
+  final String? semanticLabel;
+
   @override
   Widget build(BuildContext context) {
     final color = _resolveColor(context, this.color);
-    return SizedBox(
-      width: size,
-      height: size,
-      child: CircularProgressIndicator(
-        strokeWidth: strokeWidth,
-        valueColor: AlwaysStoppedAnimation<Color>(color),
+    return _wrapCursorSemantics(
+      SizedBox(
+        width: size,
+        height: size,
+        child: CircularProgressIndicator(
+          strokeWidth: strokeWidth,
+          valueColor: AlwaysStoppedAnimation<Color>(color),
+        ),
       ),
+      semanticLabel,
     );
   }
 }
@@ -515,6 +604,7 @@ class ShimmerCursor extends StatefulWidget {
     this.height = 10,
     this.borderRadius = const BorderRadius.all(Radius.circular(4)),
     this.period = const Duration(milliseconds: 1400),
+    this.semanticLabel,
   });
 
   /// Bar background colour. Defaults to 20% opacity of ambient text colour.
@@ -534,6 +624,11 @@ class ShimmerCursor extends StatefulWidget {
 
   /// One full sweep.
   final Duration period;
+
+  /// Optional label announced to assistive technology in place of the
+  /// (purely decorative) animation. When `null` (the default), the cursor
+  /// is excluded from the semantics tree entirely.
+  final String? semanticLabel;
 
   @override
   State<ShimmerCursor> createState() => _ShimmerCursorState();
@@ -557,34 +652,37 @@ class _ShimmerCursorState extends State<ShimmerCursor>
     final ambient = _resolveColor(context, null);
     final base = widget.baseColor ?? ambient.withValues(alpha: 0.20);
     final highlight = widget.highlightColor ?? ambient.withValues(alpha: 0.50);
-    return ClipRRect(
-      borderRadius: widget.borderRadius,
-      child: SizedBox(
-        width: widget.width,
-        height: widget.height,
-        child: AnimatedBuilder(
-          animation: _c,
-          builder: (_, __) {
-            // Sweep from -1 → 2 so highlight enters and exits fully.
-            final stop = -1 + 3 * _c.value;
-            return DecoratedBox(
-              decoration: BoxDecoration(
-                color: base,
-                gradient: LinearGradient(
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                  colors: <Color>[base, highlight, base],
-                  stops: <double>[
-                    (stop - 0.2).clamp(0.0, 1.0),
-                    stop.clamp(0.0, 1.0),
-                    (stop + 0.2).clamp(0.0, 1.0),
-                  ],
+    return _wrapCursorSemantics(
+      ClipRRect(
+        borderRadius: widget.borderRadius,
+        child: SizedBox(
+          width: widget.width,
+          height: widget.height,
+          child: AnimatedBuilder(
+            animation: _c,
+            builder: (_, __) {
+              // Sweep from -1 → 2 so highlight enters and exits fully.
+              final stop = -1 + 3 * _c.value;
+              return DecoratedBox(
+                decoration: BoxDecoration(
+                  color: base,
+                  gradient: LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    colors: <Color>[base, highlight, base],
+                    stops: <double>[
+                      (stop - 0.2).clamp(0.0, 1.0),
+                      stop.clamp(0.0, 1.0),
+                      (stop + 0.2).clamp(0.0, 1.0),
+                    ],
+                  ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
+      widget.semanticLabel,
     );
   }
 }
