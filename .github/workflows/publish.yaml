@@ -1,0 +1,40 @@
+name: Publish to pub.dev
+
+# Publishes when a version tag is pushed, e.g. `v0.5.0`.
+# Authentication is keyless (OIDC) — no PUB_TOKEN secret is stored. You must
+# first enable automated publishing for this package on pub.dev:
+#   pub.dev -> package -> Admin -> Automated publishing ->
+#     Enable publishing from GitHub Actions
+#     Repository: NarekManukyan/flutter_markdown_stream
+#     Tag pattern: v{{version}}
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # required for OIDC authentication with pub.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # Gate: never publish a tag that does not pass CI.
+      - name: Analyze
+        run: flutter analyze lib test
+
+      - name: Test
+        run: flutter test
+
+      - name: Publish
+        run: flutter pub publish --force
