@@ -24,6 +24,11 @@ jobs:
         with:
           persist-credentials: false
 
+      # Configures pub.dev OIDC auth for `dart pub publish`. Without this the
+      # pub client finds no credentials and falls back to interactive OAuth,
+      # which hangs on CI.
+      - uses: dart-lang/setup-dart@v1
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -40,4 +45,4 @@ jobs:
         run: flutter test
 
       - name: Publish
-        run: flutter pub publish --force
+        run: dart pub publish --force
