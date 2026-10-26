@@ -227,12 +227,13 @@ final class SafeMarkdownParser {
   static String _closers(String s, {required bool latexEnabled}) {
     final masked = s.split('');
     final pending = <_Closer>[];
+    final boundaries = _inlineBoundaries(s);
 
-    _maskCodeEscapesAndUrls(s, masked, pending);
+    _maskCodeEscapesAndUrls(s, masked, pending, boundaries);
     if (latexEnabled) _balanceLatex(masked, pending);
 
     final scan = masked.join();
-    final scopeStart = _inlineScopeStart(scan);
+    final scopeStart = boundaries.isEmpty ? 0 : boundaries.last;
     _balanceStrikethrough(scan, scopeStart, pending);
     _balanceEmphasisChar(scan, '*', scopeStart, pending);
     _balanceEmphasisChar(scan, '_', scopeStart, pending);
@@ -243,8 +244,6 @@ final class SafeMarkdownParser {
     return pending.map((c) => c.text).join();
   }
 
-  static final RegExp _paragraphBreak = RegExp(r'\n[ \t]*\n');
-
   // A line that begins a new block whose inline content cannot continue an
   // emphasis span from the line above: a list item, a heading or a table
   // row.
@@ -253,28 +252,33 @@ final class SafeMarkdownParser {
   );
   static final RegExp _headingLine = RegExp(r'^[ \t]{0,3}#{1,6}([ \t]|$)');
 
-  /// Returns the offset where the block still being written begins. Inline
-  /// delimiters cannot span block boundaries, so only openers at or after
-  /// this offset can still be closed by text that has yet to arrive.
-  static int _inlineScopeStart(String s) {
-    var start = 0;
-    for (final m in _paragraphBreak.allMatches(s)) {
-      start = m.end;
-    }
-    var lineStart = start;
+  /// Returns, in order, the offsets of the lines that start a new inline
+  /// scope: the first line after a blank line, a list item, a heading or a
+  /// table row, and the line after a heading. Inline delimiters and code spans
+  /// cannot cross these boundaries, so only openers at or after the last one
+  /// can still be closed by text that has yet to arrive.
+  static List<int> _inlineBoundaries(String s) {
+    final boundaries = <int>[];
+    var lineStart = 0;
+    var previousWasBlank = false;
     var previousWasHeading = false;
-    while (lineStart <= s.length) {
+    while (true) {
       var lineEnd = s.indexOf('\n', lineStart);
       if (lineEnd == -1) lineEnd = s.length;
       final line = s.substring(lineStart, lineEnd);
-      if (previousWasHeading || _blockStartLine.hasMatch(line)) {
-        start = lineStart;
+      final blank = line.trim().isEmpty;
+      if (lineStart > 0 &&
+          ((previousWasBlank && !blank) ||
+              previousWasHeading ||
+              _blockStartLine.hasMatch(line))) {
+        boundaries.add(lineStart);
       }
+      previousWasBlank = blank;
       previousWasHeading = _headingLine.hasMatch(line);
       if (lineEnd == s.length) break;
       lineStart = lineEnd + 1;
     }
-    return start;
+    return boundaries;
   }
 
   static final RegExp _urlStart = RegExp(r'(https?://|www\.)');
@@ -292,11 +296,11 @@ final class SafeMarkdownParser {
     String s,
     List<String> masked,
     List<_Closer> pending,
+    List<int> boundaries,
   ) {
-    final breaks = _paragraphBreak.allMatches(s).map((m) => m.start).toList();
-    int nextBreakAfter(int i) {
-      for (final b in breaks) {
-        if (b >= i) return b;
+    int nextBoundaryAfter(int i) {
+      for (final b in boundaries) {
+        if (b > i) return b;
       }
       return s.length;
     }
@@ -313,14 +317,14 @@ final class SafeMarkdownParser {
       }
 
       // Code span: a backtick run closed by the next run of the same
-      // length within the same paragraph.
+      // length within the same block.
       if (c == '`') {
         var j = i;
         while (j < s.length && s[j] == '`') {
           j++;
         }
         final len = j - i;
-        final limit = nextBreakAfter(j);
+        final limit = nextBoundaryAfter(j);
         var k = j;
         var closeAt = -1;
         while (k < limit) {
@@ -344,8 +348,8 @@ final class SafeMarkdownParser {
           continue;
         }
         // Unmatched run. It is a still-open code span if it sits in the
-        // final paragraph — unless it is alone at the start of the last
-        // line, where it is more likely the first characters of a fence.
+        // block still being written, unless it is alone at the start of the
+        // last line, where it is more likely the first characters of a fence.
         if (limit == s.length && !_isBareRunAtLineStart(s, i, j)) {
           pending.add(_Closer(i, '`' * len));
           _maskRange(masked, i, s.length);

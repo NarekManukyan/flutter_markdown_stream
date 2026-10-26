@@ -393,6 +393,27 @@ void main() {
         expect(SafeMarkdownParser.sanitize(s), s);
       });
 
+      test('an unclosed backtick in an earlier list item is left alone', () {
+        const s = '- run `foo\n- second';
+        expect(SafeMarkdownParser.sanitize(s), s);
+      });
+
+      test('an earlier unclosed backtick does not block emphasis repair', () {
+        expect(SafeMarkdownParser.sanitize('- a `b\n- **c'), '- a `b\n- **c**');
+      });
+
+      test('an unclosed backtick in a heading is left alone', () {
+        const s = '# Title `x\nbody';
+        expect(SafeMarkdownParser.sanitize(s), s);
+      });
+
+      test('a code span cannot pair backticks across list items', () {
+        // Item 1's backtick stays literal; item 2's two backticks pair up
+        // with each other, so nothing is left open.
+        const s = '- a `b\n- c` and `d';
+        expect(SafeMarkdownParser.sanitize(s), s);
+      });
+
       test('emphasis still closes across soft line breaks', () {
         expect(
           SafeMarkdownParser.sanitize('**bold\ncontinues'),
