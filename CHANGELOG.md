@@ -1,11 +1,110 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
-Correctness and rendering fixes, plus per-block rendering for long answers.
+Chat-app essentials (static messages, thinking sections, a first-token
+placeholder and a link policy), correctness and rendering fixes, per-block
+rendering for long answers, and calmer streaming motion.
+
+### Migrating from 0.5.x
+
+No code changes are required for most apps. Check these if they apply:
+
+- **Cursor position.** `cursorWidget` now renders inline after the last
+  character instead of on its own line. A tall or wide custom cursor (for
+  example a typing-dots row) now affects the height of the last text line. If
+  you want it below the text, render it yourself under `MarkdownStream` while
+  the stream is active and leave `cursorWidget` null.
+- **Widget tests that count `MarkdownBody`.** With `wordFadeIn` (the default)
+  or `incrementalParsing`, there is one `MarkdownBody` per top-level block,
+  during streaming and after completion. `find.byType(MarkdownBody)` no
+  longer finds exactly one widget for multi-block text. Finders on text
+  (`find.text`, `find.textContaining`) are unaffected.
+  `IncrementalMarkdownBody` always returns a `Column`, even for one block.
+- **`StreamingTextController.restart()` without a `streamFactory`** no longer
+  throws from the controller. The `StateError` goes to `FlutterError.onError`
+  and the call does nothing. Code that caught the exception should pass a
+  `streamFactory` instead.
+- **Partial links** show their label while the URL is still streaming.
+  Snapshot or golden tests that captured mid-stream frames with a half-typed
+  link need updating.
+- **Stream errors.** `onDone` still fires after an error, as before. The
+  controller now ends in `StreamingState.error` rather than `completed`, so
+  code that waits for `completed` after an error should also accept `error`
+  (`StreamingState.isFinished` covers both).
+- **Word fade timing.** Each word now fades in over `wordFadeDuration` (300ms)
+  from the moment it arrives, instead of by its distance from the end of the
+  text. Pass `wordFadeDuration: null` to keep the 0.5 behaviour.
+- **Links and images are filtered.** The new `linkPolicy` allows `http`,
+  `https` and `mailto` links, relative links and `http`/`https` images by
+  default. Links with any other scheme (including custom app schemes) render
+  as plain text and no longer reach `onTapLink`, and other images show their
+  alt text. Relative image paths are blocked unless `imageDirectory` is set.
+  Add your schemes with `LinkPolicy(linkSchemes: {...})`, or pass
+  `linkPolicy: null` for the old behaviour.
+- **`<think>` sections.** A response that starts with `<think>` or
+  `<thinking>` now renders that part as a collapsible thinking section
+  instead of text. Pass `parseThinking: false` to keep the tags as text.
+- **Tables scroll sideways.** Columns now size to their content (up to
+  `tableColumnMaxWidth`, 320 by default) and a wide table scrolls
+  horizontally, so a narrow table no longer stretches to the full width. Pass
+  `tableColumnMaxWidth: null`, or set `MarkdownStyleSheet.tableColumnWidth`,
+  to keep the old flex columns.
+- **Edge fade and word fade.** `StreamingTextConfig.fadeInEnabled` (used by
+  the `chatGPT`, `claude`, `gentle`, `fast` and `smooth` presets) now only
+  draws when `wordFadeIn` is `false`. With the word fade on, the edge mask
+  greyed out the whole last line on top of it. Set `wordFadeIn: false` to keep
+  the edge fade.
+- **Default curves and presets.** `StreamingTextConfig.fadeInCurve` now
+  defaults to a strong ease-out (`Cubic(0.23, 1, 0.32, 1)`), and the `claude`
+  preset fades over 300ms instead of 400ms. Set `fadeInCurve` and
+  `fadeInDuration` explicitly if you depend on the old values.
+
+### Chat features
+
+- `MarkdownStream.text(data: ...)` renders a finished message with the same
+  widget tree and styling as a completed stream, for earlier messages in a
+  chat. No fake stream needed.
+- `initialText` shows text at once before the stream starts, for resuming an
+  interrupted answer. The smoother treats it as already revealed.
+- Thinking sections: a leading `<think>…</think>` (or `<thinking>`) renders
+  as a `ThinkingBlock`, a "Thinking…" header that is open while the model
+  thinks and folds to "Thought for 12s" when the answer starts. Half-typed
+  tags are hidden while streaming. Customise it with `thinkingBuilder`, which
+  gets a `ThinkingState` with the text, whether it is active, the elapsed time
+  and the rendered content.
+- `placeholder` is shown until the first chunk arrives and cross-fades to the
+  text. `ShimmerText` is a ready-made "Thinking…" line for it.
+- `LinkPolicy` keeps `javascript:`, `data:`, `file:` and other unexpected
+  links and images out of model output, including disguised schemes
+  (`javascript&#58;`, `java\tscript:`) and reference-style definitions.
+
+### Motion
+
+- Words fade in on a frame-synced clock, so the last words of a chunk finish
+  fading while the stream stalls instead of staying dim until more text comes.
+- A paragraph that has just finished keeps its word fade until its last word
+  is opaque, then swaps to `MarkdownBody`. The same happens when the stream
+  completes. Both used to snap the remaining faint words to full opacity.
+- `BlinkingCursor` and `BarCursor` stay solid while text is arriving and only
+  blink while the stream waits, like a caret while you type.
+- The code block's Copy button cross-fades its icon and label (with a slight
+  scale on the icon) and animates its width, instead of swapping instantly.
+- The trailing edge fade uses the mirrored curve when it fades out, so it
+  eases out in both directions.
+- With reduce motion turned on (`MediaQuery.disableAnimations`), the word fade,
+  the trailing edge fade and the Copy button transitions are skipped, and
+  `AutoScroll` jumps to the bottom instead of animating.
+- The trailing edge fade is skipped while the word fade is on, so the two no
+  longer stack.
+- Presets no longer use ease-in-out curves: `gentle` keeps 500ms with the
+  default ease-out, `smooth` and `claude` use the default curve.
 
 ### Fixed — sanitizer
 
+- A single `~` between digits (`20~25 and 30~40`) is shown as a tilde instead
+  of turning the text between two ranges into strikethrough. `~~` still
+  strikes, and code, URLs and math are left alone.
 - Delimiters inside inline code, backslash escapes, bare URLs and link
   destinations no longer get a stray closer appended (`` `a*b` ``,
   `https://x.com/_id`, `\*`, `` `$HOME` `` with LaTeX on).
@@ -39,6 +138,10 @@ Correctness and rendering fixes, plus per-block rendering for long answers.
 
 ### Fixed — rendering
 
+- Tables wider than the screen scroll horizontally instead of squeezing every
+  column. Display math (`$$…$$`) from `latexBuilder` scrolls horizontally
+  instead of overflowing.
+- `AutoScroll` follows a `trigger` even when nothing else schedules a frame.
 - Already-settled blocks now pick up a new `styleSheet` (e.g. a theme switch
   mid-stream).
 - The word-faded paragraph uses the resolved style sheet for bold, italic,
@@ -58,6 +161,18 @@ Correctness and rendering fixes, plus per-block rendering for long answers.
 - `WordFadeText.styleSheet`, `WordFadeText.trailing` and
   `WordFadeText.renderedTags`.
 - `IncrementalMarkdownBody.blockSpacing`.
+- `MarkdownStream.wordFadeDuration`, `WordFadeText.fadeDuration` and
+  `WordFadeText.fadeCurve`.
+- `MarkdownStream.text`, `MarkdownStream.initialText`,
+  `MarkdownStream.placeholder`, `MarkdownStream.parseThinking`,
+  `MarkdownStream.thinkingBuilder` and `MarkdownStream.linkPolicy`.
+- `LinkPolicy`, `ThinkingBlock`, `ThinkingState`, `ThinkingBuilder` and
+  `ShimmerText`.
+- `OutputSmoother(initialText: ...)`.
+- `MarkdownStream.tableColumnMaxWidth`.
+- `SafeMarkdownParser.escapeSingleTildes`.
+- `IncrementalMarkdownBody.settleDuration` and
+  `IncrementalMarkdownBody.tailSettled`.
 
 ## 0.5.0
 

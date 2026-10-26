@@ -9,7 +9,7 @@ void main() {
       expect(c.rebuildDebounce, const Duration(milliseconds: 16));
       expect(c.fadeInEnabled, isFalse);
       expect(c.fadeInDuration, const Duration(milliseconds: 300));
-      expect(c.fadeInCurve, Curves.easeOut);
+      expect(c.fadeInCurve, const Cubic(0.23, 1, 0.32, 1));
       expect(c.trailingFadeHeight, 40);
     });
 
@@ -58,7 +58,8 @@ void main() {
       const p = StreamingPresets.claude;
       expect(p.rebuildDebounce, const Duration(milliseconds: 80));
       expect(p.fadeInEnabled, isTrue);
-      expect(p.fadeInCurve, Curves.easeInOutCubic);
+      expect(p.fadeInDuration, const Duration(milliseconds: 300));
+      expect(p.fadeInCurve, const Cubic(0.23, 1, 0.32, 1));
     });
 
     test('instant preset has zero debounce and no fade', () {

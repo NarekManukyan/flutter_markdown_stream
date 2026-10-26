@@ -190,6 +190,9 @@ class StickToBottomController {
         jumpToBottom();
       }
     });
+    // A post-frame callback alone does not schedule a frame. Request one so
+    // a follow with no layout change behind it (a bare trigger) still runs.
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   /// Immediately scrolls to the bottom, with no animation, and re-pins
@@ -370,7 +373,8 @@ class AutoScroll extends StatefulWidget {
   final double threshold;
 
   /// Duration of the scroll-to-bottom animation. Ignored when [controller]
-  /// is supplied.
+  /// is supplied. With reduce motion on (`MediaQuery.disableAnimations`),
+  /// [AutoScroll] jumps to the bottom instead of animating.
   final Duration autoScrollDuration;
 
   /// Curve of the scroll-to-bottom animation. Ignored when [controller] is
@@ -419,7 +423,11 @@ class AutoScrollState extends State<AutoScroll> {
     );
   }
 
-  void _handleTrigger() => controller.follow();
+  // Read from MediaQuery in build; with reduce motion on, following jumps
+  // instead of animating.
+  bool _reduceMotion = false;
+
+  void _handleTrigger() => controller.follow(animate: !_reduceMotion);
 
   @override
   void didUpdateWidget(covariant AutoScroll oldWidget) {
@@ -436,7 +444,7 @@ class AutoScrollState extends State<AutoScroll> {
       _ensureController();
     }
     controller.enabled = widget.enabled;
-    controller.follow();
+    controller.follow(animate: !_reduceMotion);
   }
 
   @override
@@ -448,6 +456,7 @@ class AutoScrollState extends State<AutoScroll> {
 
   @override
   Widget build(BuildContext context) {
+    _reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     // A ScrollMetricsNotification fires whenever the scrollable's metrics
     // change *without* a user scroll — most importantly when its content
     // grows and maxScrollExtent increases. Following on that notification is

@@ -85,6 +85,48 @@ final class SafeMarkdownParser {
     }
   }
 
+  /// Escapes every single `~` that sits between two digits, so `20~25` stays
+  /// a range instead of opening a strikethrough.
+  ///
+  /// GitHub-flavoured Markdown treats a single `~` as strikethrough, so
+  /// `20~25 and 30~40` would strike "25 and 30". `~~` runs, and tildes inside
+  /// fenced code, code spans, URLs, link destinations and (with
+  /// [latexEnabled]) math are left alone. Apply it to text right before it
+  /// is parsed for rendering; the result renders the same `~` characters.
+  static String escapeSingleTildes(String input, {bool latexEnabled = false}) {
+    if (!input.contains('~')) return input;
+    try {
+      // Blank out fenced code (fence lines included) so nothing in it can
+      // be mistaken for a code span or a tilde to escape.
+      final s = maskFencedCode(input, _mask);
+      final masked = s.split('');
+      _maskCodeEscapesAndUrls(s, masked, <_Closer>[], _inlineBoundaries(s));
+      if (latexEnabled) _balanceLatex(masked, <_Closer>[]);
+
+      StringBuffer? out;
+      var copied = 0;
+      for (var i = 1; i < masked.length - 1; i++) {
+        if (masked[i] != '~' ||
+            masked[i - 1] == '~' ||
+            masked[i + 1] == '~' ||
+            !_isDigit(masked[i - 1]) ||
+            !_isDigit(masked[i + 1])) {
+          continue;
+        }
+        out ??= StringBuffer();
+        out
+          ..write(input.substring(copied, i))
+          ..write(r'\');
+        copied = i;
+      }
+      if (out == null) return input;
+      out.write(input.substring(copied));
+      return out.toString();
+    } catch (_) {
+      return input;
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // 1. Normalise line endings.
   // ---------------------------------------------------------------------------

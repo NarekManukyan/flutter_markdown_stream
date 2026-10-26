@@ -35,6 +35,7 @@ void main() {
         home: Scaffold(
           body: MarkdownStream(
             stream: controller.stream,
+            wordFadeIn: false,
             config: const StreamingTextConfig(
               fadeInEnabled: true,
               rebuildDebounce: Duration.zero,
@@ -58,6 +59,7 @@ void main() {
         home: Scaffold(
           body: MarkdownStream(
             stream: controller.stream,
+            wordFadeIn: false,
             config: const StreamingTextConfig(
               fadeInEnabled: true,
               fadeInDuration: Duration(milliseconds: 200),
@@ -93,6 +95,7 @@ void main() {
           home: Scaffold(
             body: MarkdownStream(
               stream: controller.stream,
+              wordFadeIn: false,
               config: config,
             ),
           ),
@@ -113,7 +116,8 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('chatGPT preset produces a ShaderMask', (tester) async {
+  testWidgets('chatGPT preset produces a ShaderMask without the word fade',
+      (tester) async {
     final controller = StreamController<String>();
     addTearDown(() async => controller.close());
 
@@ -122,6 +126,7 @@ void main() {
         home: Scaffold(
           body: MarkdownStream(
             stream: controller.stream,
+            wordFadeIn: false,
             config: StreamingPresets.chatGPT,
           ),
         ),
@@ -130,6 +135,39 @@ void main() {
 
     controller.add('hello');
     await tester.pump(const Duration(milliseconds: 50));
+    expect(find.byType(ShaderMask), findsOneWidget);
+  });
+
+  testWidgets('the edge fade is skipped while the word fade is on',
+      (tester) async {
+    final controller = StreamController<String>();
+    addTearDown(() async => controller.close());
+
+    // The claude preset's edge fade, without its pacing, so the text is on
+    // screen right away.
+    final config = StreamingPresets.claude.copyWith(
+      smoothingEnabled: false,
+      rebuildDebounce: Duration.zero,
+    );
+    Widget build({required bool wordFadeIn}) => MaterialApp(
+          home: Scaffold(
+            body: MarkdownStream(
+              stream: controller.stream,
+              config: config,
+              wordFadeIn: wordFadeIn,
+            ),
+          ),
+        );
+
+    await tester.pumpWidget(build(wordFadeIn: true));
+    controller.add('hello');
+    await tester.pump();
+    expect(find.textContaining('hello'), findsOneWidget);
+    expect(find.byType(ShaderMask), findsNothing);
+
+    // Same config with the word fade off draws the edge fade.
+    await tester.pumpWidget(build(wordFadeIn: false));
+    await tester.pump();
     expect(find.byType(ShaderMask), findsOneWidget);
   });
 }
