@@ -2,8 +2,9 @@
 
 ## 0.6.0
 
-Correctness and rendering fixes, per-block rendering for long answers, and
-calmer streaming motion.
+Chat-app essentials (static messages, thinking sections, a first-token
+placeholder and a link policy), correctness and rendering fixes, per-block
+rendering for long answers, and calmer streaming motion.
 
 ### Migrating from 0.5.x
 
@@ -34,6 +35,16 @@ No code changes are required for most apps. Check these if they apply:
 - **Word fade timing.** Each word now fades in over `wordFadeDuration` (300ms)
   from the moment it arrives, instead of by its distance from the end of the
   text. Pass `wordFadeDuration: null` to keep the 0.5 behaviour.
+- **Links and images are filtered.** The new `linkPolicy` allows `http`,
+  `https` and `mailto` links, relative links and `http`/`https` images by
+  default. Links with any other scheme (including custom app schemes) render
+  as plain text and no longer reach `onTapLink`, and other images show their
+  alt text. Relative image paths are blocked unless `imageDirectory` is set.
+  Add your schemes with `LinkPolicy(linkSchemes: {...})`, or pass
+  `linkPolicy: null` for the old behaviour.
+- **`<think>` sections.** A response that starts with `<think>` or
+  `<thinking>` now renders that part as a collapsible thinking section
+  instead of text. Pass `parseThinking: false` to keep the tags as text.
 - **Tables scroll sideways.** Columns now size to their content (up to
   `tableColumnMaxWidth`, 320 by default) and a wide table scrolls
   horizontally, so a narrow table no longer stretches to the full width. Pass
@@ -48,6 +59,25 @@ No code changes are required for most apps. Check these if they apply:
   defaults to a strong ease-out (`Cubic(0.23, 1, 0.32, 1)`), and the `claude`
   preset fades over 300ms instead of 400ms. Set `fadeInCurve` and
   `fadeInDuration` explicitly if you depend on the old values.
+
+### Chat features
+
+- `MarkdownStream.text(data: ...)` renders a finished message with the same
+  widget tree and styling as a completed stream, for earlier messages in a
+  chat. No fake stream needed.
+- `initialText` shows text at once before the stream starts, for resuming an
+  interrupted answer. The smoother treats it as already revealed.
+- Thinking sections: a leading `<think>…</think>` (or `<thinking>`) renders
+  as a `ThinkingBlock`, a "Thinking…" header that is open while the model
+  thinks and folds to "Thought for 12s" when the answer starts. Half-typed
+  tags are hidden while streaming. Customise it with `thinkingBuilder`, which
+  gets a `ThinkingState` with the text, whether it is active, the elapsed time
+  and the rendered content.
+- `placeholder` is shown until the first chunk arrives and cross-fades to the
+  text. `ShimmerText` is a ready-made "Thinking…" line for it.
+- `LinkPolicy` keeps `javascript:`, `data:`, `file:` and other unexpected
+  links and images out of model output, including disguised schemes
+  (`javascript&#58;`, `java\tscript:`) and reference-style definitions.
 
 ### Motion
 
@@ -133,6 +163,12 @@ No code changes are required for most apps. Check these if they apply:
 - `IncrementalMarkdownBody.blockSpacing`.
 - `MarkdownStream.wordFadeDuration`, `WordFadeText.fadeDuration` and
   `WordFadeText.fadeCurve`.
+- `MarkdownStream.text`, `MarkdownStream.initialText`,
+  `MarkdownStream.placeholder`, `MarkdownStream.parseThinking`,
+  `MarkdownStream.thinkingBuilder` and `MarkdownStream.linkPolicy`.
+- `LinkPolicy`, `ThinkingBlock`, `ThinkingState`, `ThinkingBuilder` and
+  `ShimmerText`.
+- `OutputSmoother(initialText: ...)`.
 - `MarkdownStream.tableColumnMaxWidth`.
 - `SafeMarkdownParser.escapeSingleTildes`.
 - `IncrementalMarkdownBody.settleDuration` and

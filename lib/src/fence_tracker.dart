@@ -61,3 +61,20 @@ final class FenceTracker {
     return false;
   }
 }
+
+/// Returns [input] with every fenced code block, fence lines included,
+/// replaced by [mask] characters. Line breaks and length are kept, so an
+/// offset in the result is the same offset in [input].
+String maskFencedCode(String input, String mask) {
+  final out = StringBuffer();
+  final fences = FenceTracker();
+  final lines = input.split('\n');
+  for (var i = 0; i < lines.length; i++) {
+    final line = lines[i];
+    final wasOpen = fences.isOpen;
+    final isFence = fences.addLine(line);
+    out.write(wasOpen || isFence ? mask * line.length : line);
+    if (i < lines.length - 1) out.write('\n');
+  }
+  return out.toString();
+}

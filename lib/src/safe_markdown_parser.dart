@@ -98,17 +98,7 @@ final class SafeMarkdownParser {
     try {
       // Blank out fenced code (fence lines included) so nothing in it can
       // be mistaken for a code span or a tilde to escape.
-      final prose = StringBuffer();
-      final fences = FenceTracker();
-      final lines = input.split('\n');
-      for (var i = 0; i < lines.length; i++) {
-        final line = lines[i];
-        final wasOpen = fences.isOpen;
-        final isFence = fences.addLine(line);
-        prose.write(wasOpen || isFence ? _mask * line.length : line);
-        if (i < lines.length - 1) prose.write('\n');
-      }
-      final s = prose.toString();
+      final s = maskFencedCode(input, _mask);
       final masked = s.split('');
       _maskCodeEscapesAndUrls(s, masked, <_Closer>[], _inlineBoundaries(s));
       if (latexEnabled) _balanceLatex(masked, <_Closer>[]);

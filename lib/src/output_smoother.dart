@@ -36,14 +36,18 @@ final class OutputSmoother {
   /// lagging arbitrarily far behind. [tickInterval] controls how often the
   /// internal timer advances the revealed prefix. [finishDuration] bounds
   /// how long [complete] is allowed to take to flush any remaining
-  /// backlog.
+  /// backlog. [initialText] counts as already revealed, so text the user
+  /// has seen before (a resumed answer) is not paced in again.
   OutputSmoother({
+    String initialText = '',
     this.charsPerSecond = 120,
     this.maxBacklogChars = 400,
     this.catchUpMultiplier = 4.0,
     this.tickInterval = const Duration(milliseconds: 16),
     this.finishDuration = const Duration(milliseconds: 250),
-  }) : assert(charsPerSecond > 0, 'charsPerSecond must be > 0'),
+  }) : _target = initialText,
+       _visible = initialText,
+       assert(charsPerSecond > 0, 'charsPerSecond must be > 0'),
        assert(maxBacklogChars > 0, 'maxBacklogChars must be > 0'),
        assert(catchUpMultiplier >= 1, 'catchUpMultiplier must be >= 1'),
        assert(tickInterval > Duration.zero, 'tickInterval must be > 0');
@@ -77,8 +81,8 @@ final class OutputSmoother {
   /// Closes after [complete] finishes flushing, or after [dispose].
   Stream<String> get revealed => _controller.stream;
 
-  String _target = '';
-  String _visible = '';
+  String _target;
+  String _visible;
   double _fractionalChars = 0;
   double _completionRate = 0;
   Timer? _timer;

@@ -10,12 +10,14 @@ import 'package:markdown/markdown.dart' as md;
 import 'incremental_markdown_body.dart';
 import 'cursor_activity.dart';
 import 'latex_syntax.dart';
+import 'link_policy.dart';
 import 'motion.dart';
 import 'output_smoother.dart';
 import 'safe_markdown_parser.dart';
 import 'word_fade.dart';
 import 'streaming_config.dart';
 import 'streaming_text_controller.dart';
+import 'thinking.dart';
 
 /// Signature for a convenience builder that renders a fenced code block.
 typedef CodeBlockBuilder = Widget Function(String code, String language);
@@ -111,6 +113,7 @@ class MarkdownStream<T> extends StatefulWidget {
     super.key,
     required this.stream,
     this.chunkToText,
+    this.initialText,
     // --- stream-specific ---
     this.onDone,
     this.onTextChanged,
@@ -129,6 +132,10 @@ class MarkdownStream<T> extends StatefulWidget {
     this.wordFadeWindow = 4,
     this.wordFadeDuration = kWordFadeDuration,
     this.tableColumnMaxWidth = 320,
+    this.linkPolicy = const LinkPolicy(),
+    this.parseThinking = true,
+    this.thinkingBuilder,
+    this.placeholder,
     // --- MarkdownBody pass-through ---
     this.styleSheet,
     this.styleSheetTheme,
@@ -153,6 +160,135 @@ class MarkdownStream<T> extends StatefulWidget {
     this.padding = EdgeInsets.zero,
   });
 
+  /// Renders finished Markdown [data] with the same widget tree, styling and
+  /// block spacing as a completed stream. Use it for earlier messages in a
+  /// chat so they look exactly like the answer that just streamed in.
+  ///
+  /// Nothing animates and no cursor or placeholder is shown. A `<think>`
+  /// section at the start renders folded away. [controller] is not
+  /// supported here.
+  ///
+  /// ```dart
+  /// MarkdownStream.text(data: message.content, styleSheet: sheet)
+  /// ```
+  static MarkdownStream<String> text({
+    Key? key,
+    required String data,
+    CodeBlockBuilder? codeBuilder,
+    LaTeXBuilder? latexBuilder,
+    TextDirection? textDirection,
+    double? tableColumnMaxWidth = 320,
+    LinkPolicy? linkPolicy = const LinkPolicy(),
+    bool parseThinking = true,
+    ThinkingBuilder? thinkingBuilder,
+    MarkdownStyleSheet? styleSheet,
+    MarkdownStyleSheetBaseTheme? styleSheetTheme,
+    SyntaxHighlighter? syntaxHighlighter,
+    MarkdownTapLinkCallback? onTapLink,
+    VoidCallback? onTapText,
+    String? imageDirectory,
+    List<md.BlockSyntax>? blockSyntaxes,
+    List<md.InlineSyntax>? inlineSyntaxes,
+    md.ExtensionSet? extensionSet,
+    MarkdownImageBuilder? imageBuilder,
+    MarkdownCheckboxBuilder? checkboxBuilder,
+    MarkdownBulletBuilder? bulletBuilder,
+    Map<String, MarkdownElementBuilder> builders = const <String, MarkdownElementBuilder>{},
+    Map<String, MarkdownPaddingBuilder> paddingBuilders = const <String, MarkdownPaddingBuilder>{},
+    MarkdownListItemCrossAxisAlignment listItemCrossAxisAlignment = MarkdownListItemCrossAxisAlignment.baseline,
+    bool fitContent = true,
+    bool shrinkWrap = true,
+    bool softLineBreak = false,
+    bool selectable = false,
+    EdgeInsetsGeometry padding = EdgeInsets.zero,
+  }) =>
+      MarkdownStream<String>._text(
+        key: key,
+        data: data,
+        codeBuilder: codeBuilder,
+        latexBuilder: latexBuilder,
+        textDirection: textDirection,
+        tableColumnMaxWidth: tableColumnMaxWidth,
+        linkPolicy: linkPolicy,
+        parseThinking: parseThinking,
+        thinkingBuilder: thinkingBuilder,
+        styleSheet: styleSheet,
+        styleSheetTheme: styleSheetTheme,
+        syntaxHighlighter: syntaxHighlighter,
+        onTapLink: onTapLink,
+        onTapText: onTapText,
+        imageDirectory: imageDirectory,
+        blockSyntaxes: blockSyntaxes,
+        inlineSyntaxes: inlineSyntaxes,
+        extensionSet: extensionSet,
+        imageBuilder: imageBuilder,
+        checkboxBuilder: checkboxBuilder,
+        bulletBuilder: bulletBuilder,
+        builders: builders,
+        paddingBuilders: paddingBuilders,
+        listItemCrossAxisAlignment: listItemCrossAxisAlignment,
+        fitContent: fitContent,
+        shrinkWrap: shrinkWrap,
+        softLineBreak: softLineBreak,
+        selectable: selectable,
+        padding: padding,
+      );
+
+  const MarkdownStream._text({
+    super.key,
+    required String data,
+    this.codeBuilder,
+    this.latexBuilder,
+    this.textDirection,
+    this.tableColumnMaxWidth = 320,
+    this.linkPolicy = const LinkPolicy(),
+    this.parseThinking = true,
+    this.thinkingBuilder,
+    // --- MarkdownBody pass-through ---
+    this.styleSheet,
+    this.styleSheetTheme,
+    this.syntaxHighlighter,
+    this.onTapLink,
+    this.onTapText,
+    this.imageDirectory,
+    this.blockSyntaxes,
+    this.inlineSyntaxes,
+    this.extensionSet,
+    this.imageBuilder,
+    this.checkboxBuilder,
+    this.bulletBuilder,
+    this.builders = const <String, MarkdownElementBuilder>{},
+    this.paddingBuilders = const <String, MarkdownPaddingBuilder>{},
+    this.listItemCrossAxisAlignment =
+        MarkdownListItemCrossAxisAlignment.baseline,
+    this.fitContent = true,
+    this.shrinkWrap = true,
+    this.softLineBreak = false,
+    this.selectable = false,
+    this.padding = EdgeInsets.zero,
+  })  : stream = _kStaticStream,
+        initialText = data,
+        chunkToText = null,
+        onDone = null,
+        onTextChanged = null,
+        onError = null,
+        errorBuilder = null,
+        cursorWidget = null,
+        rebuildDebounce = Duration.zero,
+        config = null,
+        controller = null,
+        streamFactory = null,
+        incrementalParsing = false,
+        wordFadeIn = true,
+        wordFadeWindow = 4,
+        wordFadeDuration = kWordFadeDuration,
+        placeholder = null;
+
+  /// Marks a [MarkdownStream.text] widget.
+  static const Stream<Never> _kStaticStream = Stream<Never>.empty();
+
+  bool get _isStatic => identical(stream, _kStaticStream);
+
   // ----- stream-specific ------------------------------------------------------
 
   /// The stream of chunks to render. Each event is appended to the
@@ -165,13 +301,21 @@ class MarkdownStream<T> extends StatefulWidget {
   /// this `null` to use identity.
   final ChunkToText<T>? chunkToText;
 
+  /// Text shown before the first chunk, as if it had already streamed in.
+  /// Use it to resume an interrupted answer: pass what was received so far
+  /// and a stream of the rest. It appears at once, without pacing or fade,
+  /// and [onDone] reports it together with the streamed text.
+  ///
+  /// For a message that is already complete, use [MarkdownStream.text].
+  final String? initialText;
+
   /// Called when [stream] emits a `done` event, with the full accumulated
   /// text.
   final MarkdownStreamDoneCallback? onDone;
 
   /// Called on every rendered-text change with the current *projected*
-  /// (sanitized, and when smoothing is enabled, paced) text — the exact
-  /// string handed to the underlying `MarkdownBody` that frame.
+  /// (sanitized, and when smoothing is enabled, paced) text of the whole
+  /// response, including any `<think>` section.
   ///
   /// Fires on each debounced batch (or each smoothing tick), plus once more
   /// with the final text on completion. Useful for driving an auto-scroll
@@ -279,6 +423,30 @@ class MarkdownStream<T> extends StatefulWidget {
   /// scrolls.
   final double? tableColumnMaxWidth;
 
+  /// Which link and image destinations are rendered. The default allows
+  /// `http`, `https` and `mailto` links, relative links and `http`/`https`
+  /// images; anything else (`javascript:`, `data:`, `file:`, custom schemes)
+  /// shows as plain text and never reaches [onTapLink]. Setting
+  /// [imageDirectory] also allows relative image paths.
+  ///
+  /// Pass `null` to render every link and image as `MarkdownBody` would.
+  final LinkPolicy? linkPolicy;
+
+  /// Whether a `<think>…</think>` (or `<thinking>…</thinking>`) section at
+  /// the start of the response is rendered as a separate, collapsible
+  /// thinking section instead of as text. Defaults to `true`.
+  final bool parseThinking;
+
+  /// Builds the thinking section. Defaults to [ThinkingBlock.fromState]:
+  /// a "Thinking…" header over the thinking text, open while the model
+  /// thinks and folded away once the answer starts.
+  final ThinkingBuilder? thinkingBuilder;
+
+  /// Shown while the stream is open and nothing has arrived yet, for example
+  /// `ShimmerText('Thinking…')`. It cross-fades to the text when the first
+  /// chunk lands. When `null`, [cursorWidget] (if any) is shown alone.
+  final Widget? placeholder;
+
   // ----- MarkdownBody pass-through -------------------------------------------
 
   /// See [MarkdownBody.styleSheet].
@@ -349,13 +517,34 @@ class MarkdownStream<T> extends StatefulWidget {
 /// Immutable render-time state.
 @immutable
 class _RenderState {
-  const _RenderState({required this.text, required this.isDone, this.error});
+  const _RenderState({
+    required this.text,
+    required this.isDone,
+    this.error,
+    this.answer,
+    this.thinking,
+    this.thinkingOpen = false,
+    this.thinkingElapsed,
+  });
 
+  /// The full projected text, reported to callbacks and the controller.
   final String text;
   final bool isDone;
 
   /// The error the stream failed with, or `null`.
   final Object? error;
+
+  /// With a thinking section: the projected text after it. Otherwise `null`
+  /// and [text] is the answer.
+  final String? answer;
+
+  /// The projected thinking text, or `null` when there is no thinking
+  /// section.
+  final String? thinking;
+  final bool thinkingOpen;
+  final Duration? thinkingElapsed;
+
+  String get answerText => answer ?? text;
 
   @override
   bool operator ==(Object other) =>
@@ -363,15 +552,31 @@ class _RenderState {
       (other is _RenderState &&
           other.text == text &&
           other.isDone == isDone &&
-          other.error == error);
+          other.error == error &&
+          other.answer == answer &&
+          other.thinking == thinking &&
+          other.thinkingOpen == thinkingOpen &&
+          other.thinkingElapsed == thinkingElapsed);
 
   @override
-  int get hashCode => Object.hash(text, isDone, error);
+  int get hashCode => Object.hash(
+        text,
+        isDone,
+        error,
+        answer,
+        thinking,
+        thinkingOpen,
+        thinkingElapsed,
+      );
 
-  _RenderState copyWith({String? text, bool? isDone}) => _RenderState(
-        text: text ?? this.text,
-        isDone: isDone ?? this.isDone,
+  /// This state, finished: the stream was stopped.
+  _RenderState stopped({Duration? thinkingElapsed}) => _RenderState(
+        text: text,
+        isDone: true,
         error: error,
+        answer: answer,
+        thinking: thinking,
+        thinkingElapsed: this.thinkingElapsed ?? thinkingElapsed,
       );
 }
 
@@ -393,6 +598,10 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
   OutputSmoother? _smoother;
   StreamSubscription<String>? _smoothSub;
 
+  /// Times the thinking section of a streamed response.
+  Stopwatch? _thinkingClock;
+  Duration? _thinkingElapsed;
+
   StreamingTextController? get _controller => widget.controller;
 
   /// When no [StreamingTextConfig] is supplied, the package defaults to a
@@ -409,8 +618,68 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
   void initState() {
     super.initState();
     _attachController(widget.controller);
+    if (widget._isStatic) {
+      _showStatic();
+      return;
+    }
+    _seedInitialText();
     _setupSmoother();
     _subscribe(widget.stream);
+  }
+
+  /// Renders [MarkdownStream.text]'s data as finished text.
+  void _showStatic() {
+    _raw
+      ..clear()
+      ..write(widget.initialText ?? '');
+    _state.value = _project(_raw.toString(), done: true);
+  }
+
+  /// Puts [MarkdownStream.initialText] in the buffer and on screen. Called
+  /// before the smoother is created so the smoother treats it as revealed.
+  void _seedInitialText() {
+    final initial = widget.initialText;
+    if (initial == null || initial.isEmpty) return;
+    _raw.write(initial);
+    _state.value = _project(_raw.toString(), done: false);
+  }
+
+  void _resetThinkingClock() {
+    _thinkingClock = null;
+    _thinkingElapsed = null;
+  }
+
+  /// Builds the render state for [raw]: sanitized while streaming, and split
+  /// into thinking and answer when it starts with a thinking section.
+  _RenderState _project(String raw, {required bool done, Object? error}) {
+    final latex = widget.latexBuilder != null;
+    String project(String s) =>
+        done ? s : SafeMarkdownParser.sanitize(s, latexEnabled: latex);
+
+    final text = project(raw);
+    final split =
+        widget.parseThinking ? ThinkingSplit.parse(raw, done: done) : null;
+    if (split == null) {
+      return _RenderState(text: text, isDone: done, error: error);
+    }
+    final open = split.isOpen && !done;
+    if (!widget._isStatic) {
+      if (open) {
+        _thinkingClock ??= Stopwatch()..start();
+      } else if (_thinkingElapsed == null && _thinkingClock != null) {
+        _thinkingElapsed = _thinkingClock!.elapsed;
+        _thinkingClock!.stop();
+      }
+    }
+    return _RenderState(
+      text: text,
+      isDone: done,
+      error: error,
+      answer: project(split.answer),
+      thinking: project(split.thinking),
+      thinkingOpen: open,
+      thinkingElapsed: _thinkingElapsed,
+    );
   }
 
   @override
@@ -420,6 +689,19 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
       _detachController(oldWidget.controller);
       _attachController(widget.controller);
     }
+    if (widget._isStatic) {
+      if (!oldWidget._isStatic ||
+          oldWidget.initialText != widget.initialText ||
+          oldWidget.parseThinking != widget.parseThinking) {
+        _sub?.cancel();
+        _sub = null;
+        _debounceTimer?.cancel();
+        _teardownSmoother();
+        _resetThinkingClock();
+        _showStatic();
+      }
+      return;
+    }
     if (oldWidget.stream != widget.stream) {
       _sub?.cancel();
       _debounceTimer?.cancel();
@@ -427,7 +709,9 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
       _raw.clear();
       _pendingRender = false;
       _paused = false;
+      _resetThinkingClock();
       _state.value = const _RenderState(text: '', isDone: false);
+      _seedInitialText();
       final c = _controller;
       if (c != null) {
         // didUpdateWidget runs during build; notifyListeners on the
@@ -537,7 +821,9 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
     _paused = false;
     // Keep the currently-rendered text; just mark it as done so the cursor
     // disappears. Do NOT fire onDone — this is an explicit user-cancel.
-    _state.value = _state.value.copyWith(isDone: true);
+    _state.value = _state.value.stopped(
+      thinkingElapsed: _thinkingClock?.elapsed,
+    );
     _controller?.internalSetState(StreamingState.completed);
   }
 
@@ -563,7 +849,9 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
     _raw.clear();
     _pendingRender = false;
     _paused = false;
+    _resetThinkingClock();
     _state.value = const _RenderState(text: '', isDone: false);
+    _seedInitialText();
     _controller?.internalReset();
     _setupSmoother();
     _subscribe(factory());
@@ -577,6 +865,7 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
     final mult = _controller?.speedMultiplier ?? 1.0;
     final cps = cfg.charsPerSecond * (mult <= 0 ? 1.0 : mult);
     final s = OutputSmoother(
+      initialText: _raw.toString(),
       charsPerSecond: cps <= 0 ? 1.0 : cps,
       maxBacklogChars: cfg.smoothingMaxBacklogChars,
     );
@@ -596,9 +885,7 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
   /// slice is still repaired, then emit it.
   void _onRevealed(String rawPrefix) {
     if (!mounted || _paused || _state.value.isDone) return;
-    final latex = widget.latexBuilder != null;
-    final text = SafeMarkdownParser.sanitize(rawPrefix, latexEnabled: latex);
-    _emitText(text, done: false);
+    _emit(_project(rawPrefix, done: false));
   }
 
   // --- stream lifecycle ------------------------------------------------------
@@ -690,24 +977,22 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
   void _renderNow({bool done = false, Object? error}) {
     _pendingRender = false;
     if (!mounted) return;
-    final raw = _raw.toString();
-    final latex = widget.latexBuilder != null;
-    final nextText =
-        done ? raw : SafeMarkdownParser.sanitize(raw, latexEnabled: latex);
-    _emitText(nextText, done: done, error: error);
+    _emit(
+      _project(
+        _raw.toString(),
+        done: done,
+        error: error ?? _state.value.error,
+      ),
+    );
   }
 
   /// Single funnel for every render-text update: pushes the new state, mirrors
   /// it onto the controller, and fires [MarkdownStream.onTextChanged].
-  void _emitText(String text, {required bool done, Object? error}) {
-    _state.value = _RenderState(
-      text: text,
-      isDone: done,
-      error: error ?? _state.value.error,
-    );
-    _controller?.internalSetCurrentText(text);
+  void _emit(_RenderState next) {
+    _state.value = next;
+    _controller?.internalSetCurrentText(next.text);
     _textChanges.value++;
-    widget.onTextChanged?.call(text);
+    widget.onTextChanged?.call(next.text);
   }
 
   @override
@@ -753,6 +1038,23 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
     ];
   }
 
+  /// [MarkdownStream.linkPolicy], allowing relative images when the caller
+  /// set an [MarkdownStream.imageDirectory] to resolve them against.
+  LinkPolicy? get _effectiveLinkPolicy {
+    final policy = widget.linkPolicy;
+    if (policy == null ||
+        widget.imageDirectory == null ||
+        policy.allowRelativeImages) {
+      return policy;
+    }
+    return LinkPolicy(
+      linkSchemes: policy.linkSchemes,
+      imageSchemes: policy.imageSchemes,
+      allowRelativeLinks: policy.allowRelativeLinks,
+      allowRelativeImages: true,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final config = widget.config;
@@ -767,6 +1069,9 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
           wordFadeWindow: widget.wordFadeWindow,
           wordFadeDuration: widget.wordFadeDuration,
           tableColumnMaxWidth: widget.tableColumnMaxWidth,
+          linkPolicy: _effectiveLinkPolicy,
+          thinkingBuilder: widget.thinkingBuilder,
+          placeholder: widget.placeholder,
           textDirection: widget.textDirection,
           styleSheet: widget.styleSheet,
           styleSheetTheme: widget.styleSheetTheme,
@@ -822,6 +1127,9 @@ class _MarkdownBodyWithCursor extends StatefulWidget {
     required this.wordFadeWindow,
     required this.wordFadeDuration,
     required this.tableColumnMaxWidth,
+    required this.linkPolicy,
+    required this.thinkingBuilder,
+    required this.placeholder,
     required this.textDirection,
     required this.styleSheet,
     required this.styleSheetTheme,
@@ -858,6 +1166,9 @@ class _MarkdownBodyWithCursor extends StatefulWidget {
   final int wordFadeWindow;
   final Duration? wordFadeDuration;
   final double? tableColumnMaxWidth;
+  final LinkPolicy? linkPolicy;
+  final ThinkingBuilder? thinkingBuilder;
+  final Widget? placeholder;
   final TextDirection? textDirection;
   final MarkdownStyleSheet? styleSheet;
   final MarkdownStyleSheetBaseTheme? styleSheetTheme;
@@ -994,13 +1305,17 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
 
   /// Builds a `MarkdownBody` for [data] with the current styling. Used both
   /// for the whole text and, under incremental parsing, for each slice.
-  Widget _buildBody(String data) => MarkdownBody(
+  Widget _buildBody(String data) =>
+      _markdownBody(data, _bodyStyleSheet(widget.styleSheet));
+
+  Widget _markdownBody(String data, MarkdownStyleSheet? styleSheet) =>
+      MarkdownBody(
         data: data,
         selectable: widget.selectable,
-        styleSheet: _bodyStyleSheet(),
+        styleSheet: styleSheet,
         styleSheetTheme: widget.styleSheetTheme,
         syntaxHighlighter: widget.syntaxHighlighter,
-        onTapLink: widget.onTapLink,
+        onTapLink: widget.onTapLink == null ? null : _onTapLink,
         onTapText: widget.onTapText,
         imageDirectory: widget.imageDirectory,
         blockSyntaxes: widget.blockSyntaxes,
@@ -1017,11 +1332,50 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
         softLineBreak: widget.softLineBreak,
       );
 
+  /// Drops taps on links the [LinkPolicy] blocks. Blocked inline links are
+  /// already plain text; this also covers reference-style links.
+  void _onTapLink(String text, String? href, String title) {
+    final policy = widget.linkPolicy;
+    if (policy != null && !policy.allowsLink(href)) return;
+    widget.onTapLink?.call(text, href, title);
+  }
+
+  /// Text as it is handed to the Markdown parser: single tildes escaped and
+  /// blocked links and images reduced to text.
+  String _prepare(String text) {
+    var data = SafeMarkdownParser.escapeSingleTildes(
+      text,
+      latexEnabled: widget.latexEnabled,
+    );
+    final policy = widget.linkPolicy;
+    if (policy != null) data = policy.apply(data);
+    return data;
+  }
+
+  /// The thinking text rendered as Markdown in a muted colour.
+  Widget _buildThinkingContent(BuildContext context, String thinking) {
+    if (thinking.isEmpty) return const SizedBox.shrink();
+    final resolved = _resolvedStyleSheet(context);
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    final sheet = _bodyStyleSheet(
+      (widget.styleSheet ?? MarkdownStyleSheet()).copyWith(
+        p: resolved.p?.copyWith(color: muted),
+        listBullet: resolved.listBullet?.copyWith(color: muted),
+        tableScrollbarThumbVisibility:
+            widget.styleSheet?.tableScrollbarThumbVisibility,
+      ),
+    );
+    return IncrementalMarkdownBody(
+      data: _prepare(thinking),
+      sliceBuilder: (slice) => _markdownBody(slice, sheet),
+      blockSpacing: widget.styleSheet?.blockSpacing ?? 8,
+    );
+  }
+
   /// [MarkdownStream.styleSheet] with scrollable table columns, unless the
   /// caller chose a column width or turned scrolling off.
-  MarkdownStyleSheet? _bodyStyleSheet() {
+  MarkdownStyleSheet? _bodyStyleSheet(MarkdownStyleSheet? sheet) {
     final maxWidth = widget.tableColumnMaxWidth;
-    final sheet = widget.styleSheet;
     if (maxWidth == null || sheet?.tableColumnWidth != null) return sheet;
     return (sheet ?? MarkdownStyleSheet()).copyWith(
       tableColumnWidth: _CappedIntrinsicColumnWidth(maxWidth),
@@ -1076,12 +1430,18 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
 
   @override
   Widget build(BuildContext context) {
-    final streaming = !widget.state.isDone;
-    final cursor = streaming ? widget.cursorWidget : null;
-    var data = SafeMarkdownParser.escapeSingleTildes(
-      widget.state.text,
-      latexEnabled: widget.latexEnabled,
-    );
+    final state = widget.state;
+    final streaming = !state.isDone;
+    final thinkingActive = streaming && state.thinkingOpen;
+    final answer = state.answerText;
+    final waiting = streaming && answer.isEmpty && state.thinking == null;
+    final showPlaceholder = waiting && widget.placeholder != null;
+    // While the model thinks, the thinking header shows activity instead.
+    final cursor =
+        streaming && !thinkingActive && !showPlaceholder
+            ? widget.cursorWidget
+            : null;
+    var data = _prepare(answer);
     if (cursor != null) {
       data = _appendCursorSentinel(data);
       _inlineSyntaxes = <md.InlineSyntax>[
@@ -1118,15 +1478,70 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
     } else {
       body = _buildBody(data);
     }
-    final faded = _applyFade(body);
+    Widget content = _withPlaceholder(
+      context,
+      showPlaceholder: showPlaceholder,
+      child: _applyFade(body),
+    );
 
-    final error = widget.state.error;
+    final thinking = state.thinking;
+    if (thinking != null) {
+      final section = (widget.thinkingBuilder ?? ThinkingBlock.fromState)(
+        context,
+        ThinkingState(
+          text: thinking,
+          isActive: thinkingActive,
+          elapsed: state.thinkingElapsed,
+          content: _buildThinkingContent(context, thinking),
+        ),
+      );
+      final hasAnswer = answer.isNotEmpty || cursor != null;
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          section,
+          if (hasAnswer) SizedBox(height: widget.styleSheet?.blockSpacing ?? 8),
+          if (hasAnswer) content,
+        ],
+      );
+    }
+
+    final error = state.error;
     final errorBuilder = widget.errorBuilder;
-    if (error == null || errorBuilder == null) return faded;
+    if (error == null || errorBuilder == null) return content;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
-      children: <Widget>[faded, errorBuilder(context, error)],
+      children: <Widget>[content, errorBuilder(context, error)],
+    );
+  }
+
+  /// Cross-fades between [MarkdownStream.placeholder] and the text.
+  Widget _withPlaceholder(
+    BuildContext context, {
+    required bool showPlaceholder,
+    required Widget child,
+  }) {
+    if (widget.placeholder == null) return child;
+    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    return AnimatedSwitcher(
+      duration: reduceMotion ? Duration.zero : kSwapDuration,
+      switchInCurve: kStreamEaseOut,
+      switchOutCurve: kStreamEaseOut,
+      layoutBuilder: (current, previous) => Stack(
+        alignment: AlignmentDirectional.topStart,
+        children: <Widget>[
+          ...previous,
+          if (current != null) current,
+        ],
+      ),
+      child: showPlaceholder
+          ? KeyedSubtree(
+              key: const ValueKey<String>('placeholder'),
+              child: widget.placeholder!,
+            )
+          : KeyedSubtree(key: const ValueKey<String>('text'), child: child),
     );
   }
 }
