@@ -101,13 +101,24 @@ MarkdownStream(
 ### Per-word fade-in (`wordFadeIn`)
 
 The words in the paragraph currently being streamed fade in (opacity only, no
-blur) as they arrive — settled text stays full-fidelity, and everything is
-opaque once the stream completes.
+blur) as they arrive. Each word fades over `wordFadeDuration` (300ms) with a
+strong ease-out, so words finish fading even while the stream pauses. A
+finished paragraph, and the last one when the stream completes, keeps fading
+until its last word is opaque before it settles. With reduce motion on, words
+appear at full opacity.
 
 ```dart
 MarkdownStream(stream: llmStream);                 // on by default
-MarkdownStream(stream: llmStream, wordFadeWindow: 6); // longer, softer fade
+MarkdownStream(
+  stream: llmStream,
+  wordFadeDuration: const Duration(milliseconds: 450), // slower fade
+);
+// The 0.5 position-based ramp (the last `wordFadeWindow` words stay faded):
+MarkdownStream(stream: llmStream, wordFadeDuration: null, wordFadeWindow: 6);
 ```
+
+`BlinkingCursor` and `BarCursor` stay solid while text arrives and blink only
+while the stream waits.
 
 It applies to prose (with inline bold/italic/code/links); code blocks, tables,
 lists, headings, and blockquotes stream without a fade.

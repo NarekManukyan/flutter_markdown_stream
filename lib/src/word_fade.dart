@@ -1,14 +1,20 @@
 /// Per-word fade-in for the currently-streaming text.
 ///
 /// This renders a single run of inline Markdown (the paragraph being typed)
-/// as a `Text.rich`, grading the opacity of the most-recently-revealed words
-/// so they fade from dim to opaque as more words arrive — the opacity-only,
-/// per-word effect used by ChatGPT / Claude. The ramp is **position-based**
-/// (no timer): the last [fadeWindow] words are graded by distance from the
-/// frontier, so a word brightens naturally as the stream advances past it.
+/// as a `Text.rich`, fading in the most recently revealed words — the
+/// opacity-only, per-word effect used by ChatGPT / Claude.
 ///
-/// When [isDone] is `true` everything is fully opaque — so the final, settled
-/// text never lingers dim.
+/// Two modes:
+///
+/// * **Time-based** (when [WordFadeText.fadeDuration] is set, as
+///   `MarkdownStream` does): each word fades from transparent to opaque over
+///   `fadeDuration`, starting when it first appears. A word finishes fading
+///   even if the stream stalls, and fades never restart when later words
+///   arrive. Honours the platform's reduce-motion setting.
+/// * **Position-based** (when `fadeDuration` is null): the last
+///   [WordFadeText.fadeWindow] words are graded by distance from the
+///   frontier, so a word brightens as the stream advances past it. When
+///   [WordFadeText.isDone] is `true` everything is fully opaque.
 ///
 /// Only inline formatting is handled here (bold, italic, strikethrough,
 /// inline code); block structure, links and images are the caller's
@@ -17,13 +23,16 @@
 /// [isSimpleParagraph]).
 library;
 
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart'
     show MarkdownStyleSheet;
 import 'package:markdown/markdown.dart' as md;
 
+import 'motion.dart';
+
 /// Renders inline Markdown [text] with a trailing per-word opacity fade.
-class WordFadeText extends StatelessWidget {
+class WordFadeText extends StatefulWidget {
   /// Creates a per-word fading text run.
   const WordFadeText({
     super.key,
@@ -35,6 +44,8 @@ class WordFadeText extends StatelessWidget {
     this.fadeWindow = 4,
     this.minOpacity = 0.15,
     this.trailing,
+    this.fadeDuration,
+    this.fadeCurve = kStreamEaseOut,
   });
 
   /// The inline element tags this widget styles itself. A caller that
@@ -64,16 +75,26 @@ class WordFadeText extends StatelessWidget {
   /// Optional widget placed inline right after the last word, e.g. a cursor.
   final Widget? trailing;
 
-  /// When `true`, all words are fully opaque (the stream has finished).
+  /// Position-based mode only: when `true`, all words are fully opaque (the
+  /// stream has finished). In time-based mode words always finish their own
+  /// fade, so the last words never snap to full opacity.
   final bool isDone;
+
+  /// How long each new word takes to fade in. `null` selects the legacy
+  /// position-based ramp ([fadeWindow], [minOpacity]).
+  final Duration? fadeDuration;
+
+  /// Easing of each word's fade in time-based mode.
+  final Curve fadeCurve;
 
   /// Optional text direction forwarded to the underlying rich text.
   final TextDirection? textDirection;
 
-  /// How many trailing words are graded from dim to opaque.
+  /// Position-based mode only: how many trailing words are graded from dim to
+  /// opaque.
   final int fadeWindow;
 
-  /// Opacity of the newest word (the reveal frontier).
+  /// Position-based mode only: opacity of the newest word.
   final double minOpacity;
 
   /// Whether [text] is a plain paragraph this widget can fade — i.e. it is not
@@ -120,49 +141,140 @@ class WordFadeText extends StatelessWidget {
       RegExp(r'\]\(|\]\[|<[a-zA-Z][\w+.-]*:|https?://|www\.');
 
   @override
-  Widget build(BuildContext context) {
-    // Pass 1: flatten inline nodes into styled runs, splitting on whitespace
-    // so each non-space run is one "word" we can grade. GitHub-flavoured
-    // inline syntax matches what MarkdownBody parses by default (e.g. `~~`).
+  State<WordFadeText> createState() => _WordFadeTextState();
+}
+
+class _WordFadeTextState extends State<WordFadeText>
+    with SingleTickerProviderStateMixin {
+  // A monotonic clock built from the ticker's frame-synchronised elapsed
+  // time, kept across ticker stops so arrival times stay comparable.
+  late final Ticker _ticker = createTicker(_onTick);
+  Duration _clockBase = Duration.zero;
+  Duration _tickElapsed = Duration.zero;
+
+  // When each word (by index) first appeared, in [_now] time.
+  final List<Duration> _arrivals = <Duration>[];
+
+  // Parsed runs, reused across animation frames while the text is unchanged.
+  String? _runsText;
+  TextStyle? _runsBaseStyle;
+  MarkdownStyleSheet? _runsSheet;
+  List<_Run> _runs = const <_Run>[];
+
+  Duration get _now => _clockBase + _tickElapsed;
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    super.dispose();
+  }
+
+  void _onTick(Duration elapsed) {
+    _tickElapsed = elapsed;
+    final duration = widget.fadeDuration;
+    if (duration == null ||
+        _arrivals.isEmpty ||
+        _now - _arrivals.last >= duration) {
+      _stopTicker();
+    }
+    setState(() {});
+  }
+
+  void _stopTicker() {
+    if (!_ticker.isActive) return;
+    _clockBase += _tickElapsed;
+    _tickElapsed = Duration.zero;
+    _ticker.stop();
+  }
+
+  List<_Run> _parsedRuns() {
+    if (_runsText == widget.text &&
+        _runsBaseStyle == widget.baseStyle &&
+        _runsSheet == widget.styleSheet) {
+      return _runs;
+    }
+    // Flatten inline nodes into styled runs, splitting on whitespace so each
+    // non-space run is one "word". GitHub-flavoured inline syntax matches
+    // what MarkdownBody parses by default (e.g. `~~`).
     final runs = <_Run>[];
     final nodes = md.Document(
       extensionSet: md.ExtensionSet.gitHubFlavored,
       encodeHtml: false,
-    ).parseInline(text);
-    _walk(nodes, baseStyle, runs);
+    ).parseInline(widget.text);
+    _walk(nodes, widget.baseStyle, runs);
+    _runsText = widget.text;
+    _runsBaseStyle = widget.baseStyle;
+    _runsSheet = widget.styleSheet;
+    _runs = runs;
+    return runs;
+  }
 
+  @override
+  Widget build(BuildContext context) {
+    final runs = _parsedRuns();
     final totalWords = runs.where((r) => r.isWord).length;
+
+    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    final duration = reduceMotion ? null : widget.fadeDuration;
+    final timed = duration != null && duration > Duration.zero;
+    if (timed) {
+      if (_arrivals.length > totalWords) {
+        _arrivals.removeRange(totalWords, _arrivals.length);
+      }
+      while (_arrivals.length < totalWords) {
+        _arrivals.add(_now);
+      }
+      if (_arrivals.isNotEmpty &&
+          _now - _arrivals.last < duration &&
+          !_ticker.isActive) {
+        _ticker.start();
+      }
+    } else {
+      _stopTicker();
+    }
 
     // Resolve the ambient text colour so the fade never falls back to a
     // hardcoded black (which would be invisible-on-dark).
-    final Color fallbackColor = baseStyle.color ??
+    final Color fallbackColor = widget.baseStyle.color ??
         DefaultTextStyle.of(context).style.color ??
         const Color(0xFF000000);
 
-    // Pass 2: build spans, grading the last [fadeWindow] words.
     var wordIndex = 0;
     final spans = <InlineSpan>[];
     for (final run in runs) {
       final double opacity;
-      if (run.isWord) {
-        final distanceFromEnd = totalWords - 1 - wordIndex;
-        opacity = _opacityFor(distanceFromEnd);
+      if (!run.isWord) {
+        // Whitespace stays opaque to avoid flicker in the gaps.
+        opacity = 1;
+      } else if (timed) {
+        final age = _now - _arrivals[wordIndex];
+        final t =
+            (age.inMicroseconds / duration.inMicroseconds).clamp(0.0, 1.0);
+        opacity = widget.fadeCurve.transform(t);
+        wordIndex++;
+      } else if (reduceMotion && widget.fadeDuration != null) {
+        opacity = 1;
         wordIndex++;
       } else {
-        // Whitespace inherits the following word's frontier state closely
-        // enough; keep it opaque to avoid flicker in the gaps.
-        opacity = 1;
+        opacity = _positionOpacity(totalWords - 1 - wordIndex);
+        wordIndex++;
       }
       final color = run.style.color ?? fallbackColor;
+      final background = run.style.backgroundColor;
       spans.add(
         TextSpan(
           text: run.text,
-          style: run.style.copyWith(color: color.withValues(alpha: opacity)),
+          style: run.style.copyWith(
+            color: color.withValues(alpha: color.a * opacity),
+            backgroundColor: background?.withValues(
+              alpha: background.a * opacity,
+            ),
+          ),
         ),
       );
     }
 
-    final trailingWidget = trailing;
+    final trailingWidget = widget.trailing;
     if (trailingWidget != null) {
       spans.add(
         WidgetSpan(
@@ -172,14 +284,18 @@ class WordFadeText extends StatelessWidget {
       );
     }
 
-    return Text.rich(TextSpan(children: spans), textDirection: textDirection);
+    return Text.rich(
+      TextSpan(children: spans),
+      textDirection: widget.textDirection,
+    );
   }
 
-  double _opacityFor(int distanceFromEnd) {
-    if (isDone || distanceFromEnd >= fadeWindow) return 1;
+  double _positionOpacity(int distanceFromEnd) {
+    if (widget.isDone || distanceFromEnd >= widget.fadeWindow) return 1;
     // distanceFromEnd 0 (newest) -> minOpacity, fadeWindow -> 1.
-    final t = (distanceFromEnd + 1) / fadeWindow;
-    return (minOpacity + (1 - minOpacity) * t).clamp(0.0, 1.0);
+    final t = (distanceFromEnd + 1) / widget.fadeWindow;
+    final min = widget.minOpacity;
+    return (min + (1 - min) * t).clamp(0.0, 1.0);
   }
 
   void _walk(List<md.Node> nodes, TextStyle style, List<_Run> out) {
@@ -199,7 +315,7 @@ class WordFadeText extends StatelessWidget {
   }
 
   TextStyle _styleForTag(String tag, TextStyle style) {
-    final sheet = styleSheet;
+    final sheet = widget.styleSheet;
     switch (tag) {
       case 'strong':
         return sheet?.strong != null

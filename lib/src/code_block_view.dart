@@ -24,6 +24,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
+import 'motion.dart';
+
 /// Builds the rich, syntax-highlighted span tree for a code body.
 ///
 /// Given the raw [code], its [language] tag, and the resolved monospaced
@@ -211,8 +213,32 @@ class _CodeBlockViewState extends State<CodeBlockView> {
     );
   }
 
+  static Widget _swapTransition(Widget child, Animation<double> animation) =>
+      FadeTransition(
+        opacity: animation,
+        child: ScaleTransition(
+          scale: Tween<double>(begin: 0.9, end: 1).animate(animation),
+          child: child,
+        ),
+      );
+
+  static Widget _startAlignedLayout(
+    Widget? currentChild,
+    List<Widget> previousChildren,
+  ) =>
+      Stack(
+        alignment: AlignmentDirectional.centerStart,
+        children: <Widget>[
+          ...previousChildren,
+          if (currentChild != null) currentChild,
+        ],
+      );
+
   Widget _buildCopyButton(TextStyle labelStyle, Color iconColor) {
     final String label = _copied ? 'Copied' : 'Copy';
+    final bool reduceMotion =
+        MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    final Duration duration = reduceMotion ? Duration.zero : kSwapDuration;
     // Present the control as a SINGLE labelled button to assistive tech:
     // `excludeSemantics` collapses the descendant Tooltip + Text semantics so
     // a screen reader announces "Copy" once, not three times.
@@ -232,17 +258,42 @@ class _CodeBlockViewState extends State<CodeBlockView> {
             onTap: _handleCopy,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Icon(
-                    _copied ? Icons.check_rounded : Icons.copy_rounded,
-                    size: 14,
-                    color: iconColor,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(label, style: labelStyle.copyWith(color: iconColor)),
-                ],
+              // Copy → Copied: the icon and label cross-fade with a slight
+              // scale-up, and the button eases to its new width instead of
+              // jumping.
+              child: AnimatedSize(
+                duration: duration,
+                curve: kStreamEaseOut,
+                alignment: AlignmentDirectional.centerEnd,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    AnimatedSwitcher(
+                      duration: duration,
+                      switchInCurve: kStreamEaseOut,
+                      switchOutCurve: kStreamEaseOut,
+                      transitionBuilder: _swapTransition,
+                      child: Icon(
+                        _copied ? Icons.check_rounded : Icons.copy_rounded,
+                        key: ValueKey<bool>(_copied),
+                        size: 14,
+                        color: iconColor,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    AnimatedSwitcher(
+                      duration: duration,
+                      switchInCurve: kStreamEaseOut,
+                      switchOutCurve: kStreamEaseOut,
+                      layoutBuilder: _startAlignedLayout,
+                      child: Text(
+                        label,
+                        key: ValueKey<String>(label),
+                        style: labelStyle.copyWith(color: iconColor),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

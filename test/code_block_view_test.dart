@@ -71,6 +71,8 @@ void main() {
       ),
     );
     expect(find.text('Copied'), findsOneWidget);
+    // The old label cross-fades out.
+    await tester.pump(const Duration(milliseconds: 200));
     expect(find.text('Copy'), findsNothing);
   });
 
@@ -103,6 +105,7 @@ void main() {
     expect(find.text('Copied'), findsOneWidget);
 
     await tester.pump(const Duration(milliseconds: 60));
+    await tester.pump(const Duration(milliseconds: 200));
     expect(find.text('Copy'), findsOneWidget);
     expect(find.text('Copied'), findsNothing);
   });

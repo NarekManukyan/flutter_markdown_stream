@@ -8,7 +8,9 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:markdown/markdown.dart' as md;
 
 import 'incremental_markdown_body.dart';
+import 'cursor_activity.dart';
 import 'latex_syntax.dart';
+import 'motion.dart';
 import 'output_smoother.dart';
 import 'safe_markdown_parser.dart';
 import 'word_fade.dart';
@@ -125,6 +127,7 @@ class MarkdownStream<T> extends StatefulWidget {
     this.incrementalParsing = false,
     this.wordFadeIn = true,
     this.wordFadeWindow = 4,
+    this.wordFadeDuration = kWordFadeDuration,
     // --- MarkdownBody pass-through ---
     this.styleSheet,
     this.styleSheetTheme,
@@ -245,17 +248,24 @@ class MarkdownStream<T> extends StatefulWidget {
 
   /// When `true`, the words in the paragraph currently being streamed fade in
   /// (opacity only) as they arrive — the calm, per-word effect used by
-  /// ChatGPT / Claude. Settled blocks render at full opacity through the
-  /// normal `MarkdownBody`; only the active paragraph fades, and everything is
-  /// fully opaque once the stream completes. Implies incremental rendering.
+  /// ChatGPT / Claude. Each word fades over [wordFadeDuration] from the moment
+  /// it appears, and finishes its fade even when the paragraph settles or the
+  /// stream completes. Settled blocks render through the normal
+  /// `MarkdownBody`. Implies incremental rendering. With the platform's
+  /// reduce-motion setting on, words appear without a fade.
   ///
   /// The fade applies to plain prose paragraphs (with inline bold/italic/code/
   /// links); code blocks, tables, lists, headings, and blockquotes stream
   /// without a fade. Defaults to `true` — pass `false` for instant text.
   final bool wordFadeIn;
 
-  /// How many trailing words are graded from dim to opaque when [wordFadeIn]
-  /// is enabled. Larger values give a longer, softer fade. Defaults to 4.
+  /// How long each new word takes to fade in when [wordFadeIn] is enabled.
+  /// Defaults to 300ms with a strong ease-out. Pass `null` for the
+  /// position-based ramp used before 0.6.0 (see [wordFadeWindow]).
+  final Duration? wordFadeDuration;
+
+  /// Position-based fade only (`wordFadeDuration: null`): how many trailing
+  /// words are graded from dim to opaque. Defaults to 4.
   final int wordFadeWindow;
 
   // ----- MarkdownBody pass-through -------------------------------------------
@@ -356,6 +366,9 @@ class _RenderState {
 
 class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
   final StringBuffer _raw = StringBuffer();
+  // Bumped on every rendered-text change; lets a blinking cursor stay solid
+  // while text is arriving (see CursorActivity).
+  final ValueNotifier<int> _textChanges = ValueNotifier<int>(0);
   final ValueNotifier<_RenderState> _state =
       ValueNotifier<_RenderState>(const _RenderState(text: '', isDone: false));
   StreamSubscription<T>? _sub;
@@ -682,6 +695,7 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
       error: error ?? _state.value.error,
     );
     _controller?.internalSetCurrentText(text);
+    _textChanges.value++;
     widget.onTextChanged?.call(text);
   }
 
@@ -692,6 +706,7 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
     _teardownSmoother();
     _detachController(widget.controller);
     _state.dispose();
+    _textChanges.dispose();
     super.dispose();
   }
 
@@ -739,6 +754,7 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
           incrementalParsing: widget.incrementalParsing,
           wordFadeIn: widget.wordFadeIn,
           wordFadeWindow: widget.wordFadeWindow,
+          wordFadeDuration: widget.wordFadeDuration,
           textDirection: widget.textDirection,
           styleSheet: widget.styleSheet,
           styleSheetTheme: widget.styleSheetTheme,
@@ -768,7 +784,7 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
           fadeInEnabled: config?.fadeInEnabled ?? false,
           fadeInDuration:
               config?.fadeInDuration ?? const Duration(milliseconds: 300),
-          fadeInCurve: config?.fadeInCurve ?? Curves.easeOut,
+          fadeInCurve: config?.fadeInCurve ?? kStreamEaseOut,
           trailingFadeHeight: config?.trailingFadeHeight ?? 40,
         ),
       ),
@@ -779,7 +795,7 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
     if (widget.textDirection != null) {
       tree = Directionality(textDirection: widget.textDirection!, child: tree);
     }
-    return tree;
+    return CursorActivity(changes: _textChanges, child: tree);
   }
 }
 
@@ -792,6 +808,7 @@ class _MarkdownBodyWithCursor extends StatefulWidget {
     required this.incrementalParsing,
     required this.wordFadeIn,
     required this.wordFadeWindow,
+    required this.wordFadeDuration,
     required this.textDirection,
     required this.styleSheet,
     required this.styleSheetTheme,
@@ -826,6 +843,7 @@ class _MarkdownBodyWithCursor extends StatefulWidget {
   final bool incrementalParsing;
   final bool wordFadeIn;
   final int wordFadeWindow;
+  final Duration? wordFadeDuration;
   final TextDirection? textDirection;
   final MarkdownStyleSheet? styleSheet;
   final MarkdownStyleSheetBaseTheme? styleSheetTheme;
@@ -907,13 +925,20 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
 
   Widget _applyFade(Widget child) {
     if (!widget.fadeInEnabled) return child;
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) return child;
     _ensureController();
     final ctrl = _fadeController!;
     return AnimatedBuilder(
       animation: ctrl,
       child: child,
       builder: (context, inner) {
-        final t = widget.fadeInCurve.transform(ctrl.value);
+        // The mask dissolves by running the controller in reverse. Applying
+        // the curve to the reversed value would turn an ease-out into an
+        // ease-in, so the flipped curve is used on the way out.
+        final curve = ctrl.status == AnimationStatus.forward
+            ? widget.fadeInCurve
+            : widget.fadeInCurve.flipped;
+        final t = curve.transform(ctrl.value);
         if (t <= 0) return inner!;
         return ShaderMask(
           blendMode: BlendMode.dstIn,
@@ -1014,6 +1039,7 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
       isDone: widget.state.isDone,
       textDirection: widget.textDirection,
       fadeWindow: widget.wordFadeWindow,
+      fadeDuration: widget.wordFadeDuration,
       trailing: hasCursor ? widget.cursorWidget : null,
     );
   }
@@ -1046,10 +1072,15 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
       body = IncrementalMarkdownBody(
         data: data,
         sliceBuilder: _buildBody,
-        tailBuilder: widget.wordFadeIn && streaming
+        tailBuilder: widget.wordFadeIn
             ? (tail) => _buildFadingTail(context, tail)
             : null,
         blockSpacing: widget.styleSheet?.blockSpacing ?? 8,
+        // A paragraph keeps its fading renderer until its last word has
+        // finished fading, then switches to MarkdownBody, so neither a new
+        // paragraph nor completion makes the last words snap to full opacity.
+        tailSettled: !streaming,
+        settleDuration: widget.wordFadeDuration ?? Duration.zero,
       );
     } else {
       body = _buildBody(data);

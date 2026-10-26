@@ -15,6 +15,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'cursor_activity.dart';
+
 Color _resolveColor(BuildContext context, Color? explicit) =>
     explicit ??
     DefaultTextStyle.of(context).style.color ??
@@ -44,6 +46,9 @@ Widget _wrapCursorSemantics(Widget child, String? semanticLabel) {
 // -----------------------------------------------------------------------------
 
 /// A simple blinking block cursor — the classic square-wave block.
+///
+/// Inside a `MarkdownStream` it stays solid while text is arriving and only
+/// blinks while the stream waits, like a caret while you type.
 ///
 /// Customise colour, size, and blink period if desired. The widget uses an
 /// [AnimationController] internally and disposes it correctly.
@@ -80,11 +85,14 @@ class BlinkingCursor extends StatefulWidget {
 }
 
 class _BlinkingCursorState extends State<BlinkingCursor>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, SolidWhileTyping {
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: widget.period,
   )..repeat();
+
+  @override
+  AnimationController get blinkController => _c;
 
   @override
   void dispose() {
@@ -120,6 +128,9 @@ class _BlinkingCursorState extends State<BlinkingCursor>
 // -----------------------------------------------------------------------------
 
 /// A thin blinking I-beam, like a traditional text cursor.
+///
+/// Inside a `MarkdownStream` it stays solid while text is arriving and only
+/// blinks while the stream waits, like a caret while you type.
 class BarCursor extends StatefulWidget {
   /// Creates a bar (I-beam) cursor.
   const BarCursor({
@@ -153,11 +164,14 @@ class BarCursor extends StatefulWidget {
 }
 
 class _BarCursorState extends State<BarCursor>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, SolidWhileTyping {
   late final AnimationController _c = AnimationController(
     vsync: this,
     duration: widget.period,
   )..repeat();
+
+  @override
+  AnimationController get blinkController => _c;
 
   @override
   void dispose() {

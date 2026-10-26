@@ -2,7 +2,8 @@
 
 ## 0.6.0
 
-Correctness and rendering fixes, plus per-block rendering for long answers.
+Correctness and rendering fixes, per-block rendering for long answers, and
+calmer streaming motion.
 
 ### Migrating from 0.5.x
 
@@ -30,6 +31,31 @@ No code changes are required for most apps. Check these if they apply:
   controller now ends in `StreamingState.error` rather than `completed`, so
   code that waits for `completed` after an error should also accept `error`
   (`StreamingState.isFinished` covers both).
+- **Word fade timing.** Each word now fades in over `wordFadeDuration` (300ms)
+  from the moment it arrives, instead of by its distance from the end of the
+  text. Pass `wordFadeDuration: null` to keep the 0.5 behaviour.
+- **Default curves and presets.** `StreamingTextConfig.fadeInCurve` now
+  defaults to a strong ease-out (`Cubic(0.23, 1, 0.32, 1)`), and the `claude`
+  preset fades over 300ms instead of 400ms. Set `fadeInCurve` and
+  `fadeInDuration` explicitly if you depend on the old values.
+
+### Motion
+
+- Words fade in on a frame-synced clock, so the last words of a chunk finish
+  fading while the stream stalls instead of staying dim until more text comes.
+- A paragraph that has just finished keeps its word fade until its last word
+  is opaque, then swaps to `MarkdownBody`. The same happens when the stream
+  completes. Both used to snap the remaining faint words to full opacity.
+- `BlinkingCursor` and `BarCursor` stay solid while text is arriving and only
+  blink while the stream waits, like a caret while you type.
+- The code block's Copy button cross-fades its icon and label (with a slight
+  scale on the icon) and animates its width, instead of swapping instantly.
+- The trailing edge fade uses the mirrored curve when it fades out, so it
+  eases out in both directions.
+- With reduce motion turned on (`MediaQuery.disableAnimations`), the word fade,
+  the trailing edge fade and the Copy button transitions are skipped.
+- Presets no longer use ease-in-out curves: `gentle` keeps 500ms with the
+  default ease-out, `smooth` and `claude` use the default curve.
 
 ### Fixed — sanitizer
 
@@ -85,6 +111,10 @@ No code changes are required for most apps. Check these if they apply:
 - `WordFadeText.styleSheet`, `WordFadeText.trailing` and
   `WordFadeText.renderedTags`.
 - `IncrementalMarkdownBody.blockSpacing`.
+- `MarkdownStream.wordFadeDuration`, `WordFadeText.fadeDuration` and
+  `WordFadeText.fadeCurve`.
+- `IncrementalMarkdownBody.settleDuration` and
+  `IncrementalMarkdownBody.tailSettled`.
 
 ## 0.5.0
 

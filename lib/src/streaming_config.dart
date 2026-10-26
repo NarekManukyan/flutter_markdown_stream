@@ -7,6 +7,8 @@ library;
 
 import 'package:flutter/widgets.dart';
 
+import 'motion.dart';
+
 /// Immutable bundle of streaming-animation settings.
 ///
 /// Supplying a [StreamingTextConfig] to [MarkdownStream] is equivalent to
@@ -22,7 +24,7 @@ class StreamingTextConfig {
     this.rebuildDebounce = const Duration(milliseconds: 16),
     this.fadeInEnabled = false,
     this.fadeInDuration = const Duration(milliseconds: 300),
-    this.fadeInCurve = Curves.easeOut,
+    this.fadeInCurve = kStreamEaseOut,
     this.trailingFadeHeight = 40,
     this.smoothingEnabled = false,
     this.charsPerSecond = 120,
@@ -51,7 +53,7 @@ class StreamingTextConfig {
   final Duration fadeInDuration;
 
   /// Curve applied to the fade-out transition. Ignored when [fadeInEnabled]
-  /// is `false`.
+  /// is `false`. Defaults to a strong ease-out, `Cubic(0.23, 1, 0.32, 1)`.
   final Curve fadeInCurve;
 
   /// Height, in logical pixels, of the trailing fade region at the bottom of
@@ -168,8 +170,7 @@ abstract final class StreamingPresets {
   static const StreamingTextConfig claude = StreamingTextConfig(
     rebuildDebounce: Duration(milliseconds: 80),
     fadeInEnabled: true,
-    fadeInDuration: Duration(milliseconds: 400),
-    fadeInCurve: Curves.easeInOutCubic,
+    fadeInDuration: Duration(milliseconds: 300),
     smoothingEnabled: true,
     charsPerSecond: 120,
   );
@@ -190,7 +191,6 @@ abstract final class StreamingPresets {
     rebuildDebounce: Duration(milliseconds: 100),
     fadeInEnabled: true,
     fadeInDuration: Duration(milliseconds: 500),
-    fadeInCurve: Curves.easeInOut,
   );
 
   /// Fast rebuilds with a short fade — good for long responses.
@@ -208,6 +208,5 @@ abstract final class StreamingPresets {
     charsPerSecond: 140,
     fadeInEnabled: true,
     fadeInDuration: Duration(milliseconds: 300),
-    fadeInCurve: Curves.easeOut,
   );
 }
