@@ -46,6 +46,10 @@ class StreamingTextConfig {
   /// Whether a trailing-gradient fade is drawn over the bottom edge of the
   /// rendered Markdown while the stream is still emitting. The fade animates
   /// away over [fadeInDuration] when the stream completes.
+  ///
+  /// Only drawn when `MarkdownStream.wordFadeIn` is `false`. The word fade
+  /// (on by default) already fades the newest words, and the edge fade on
+  /// top of it would grey out the whole last line.
   final bool fadeInEnabled;
 
   /// Duration of the fade-out transition when the stream completes. Ignored

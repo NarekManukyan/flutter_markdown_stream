@@ -108,6 +108,9 @@ class LaTeXBlockSyntax extends md.BlockSyntax {
 
 /// A [MarkdownElementBuilder] that delegates rendering of the [kLatexTag]
 /// element to a user-provided [LaTeXBuilder].
+///
+/// Display expressions (`$$…$$`) are wrapped in a horizontal scroll view, so
+/// a formula wider than the screen scrolls instead of overflowing.
 class LaTeXElementBuilder extends MarkdownElementBuilder {
   /// Creates a builder that renders LaTeX via [builder].
   LaTeXElementBuilder(this.builder);
@@ -124,6 +127,11 @@ class LaTeXElementBuilder extends MarkdownElementBuilder {
   ) {
     final content = element.textContent;
     final displayMode = element.attributes['displayMode'] == 'true';
-    return builder(content, displayMode: displayMode);
+    final math = builder(content, displayMode: displayMode);
+    if (!displayMode) return math;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: math,
+    );
   }
 }

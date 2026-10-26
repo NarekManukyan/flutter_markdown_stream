@@ -34,6 +34,16 @@ No code changes are required for most apps. Check these if they apply:
 - **Word fade timing.** Each word now fades in over `wordFadeDuration` (300ms)
   from the moment it arrives, instead of by its distance from the end of the
   text. Pass `wordFadeDuration: null` to keep the 0.5 behaviour.
+- **Tables scroll sideways.** Columns now size to their content (up to
+  `tableColumnMaxWidth`, 320 by default) and a wide table scrolls
+  horizontally, so a narrow table no longer stretches to the full width. Pass
+  `tableColumnMaxWidth: null`, or set `MarkdownStyleSheet.tableColumnWidth`,
+  to keep the old flex columns.
+- **Edge fade and word fade.** `StreamingTextConfig.fadeInEnabled` (used by
+  the `chatGPT`, `claude`, `gentle`, `fast` and `smooth` presets) now only
+  draws when `wordFadeIn` is `false`. With the word fade on, the edge mask
+  greyed out the whole last line on top of it. Set `wordFadeIn: false` to keep
+  the edge fade.
 - **Default curves and presets.** `StreamingTextConfig.fadeInCurve` now
   defaults to a strong ease-out (`Cubic(0.23, 1, 0.32, 1)`), and the `claude`
   preset fades over 300ms instead of 400ms. Set `fadeInCurve` and
@@ -53,12 +63,18 @@ No code changes are required for most apps. Check these if they apply:
 - The trailing edge fade uses the mirrored curve when it fades out, so it
   eases out in both directions.
 - With reduce motion turned on (`MediaQuery.disableAnimations`), the word fade,
-  the trailing edge fade and the Copy button transitions are skipped.
+  the trailing edge fade and the Copy button transitions are skipped, and
+  `AutoScroll` jumps to the bottom instead of animating.
+- The trailing edge fade is skipped while the word fade is on, so the two no
+  longer stack.
 - Presets no longer use ease-in-out curves: `gentle` keeps 500ms with the
   default ease-out, `smooth` and `claude` use the default curve.
 
 ### Fixed — sanitizer
 
+- A single `~` between digits (`20~25 and 30~40`) is shown as a tilde instead
+  of turning the text between two ranges into strikethrough. `~~` still
+  strikes, and code, URLs and math are left alone.
 - Delimiters inside inline code, backslash escapes, bare URLs and link
   destinations no longer get a stray closer appended (`` `a*b` ``,
   `https://x.com/_id`, `\*`, `` `$HOME` `` with LaTeX on).
@@ -92,6 +108,10 @@ No code changes are required for most apps. Check these if they apply:
 
 ### Fixed — rendering
 
+- Tables wider than the screen scroll horizontally instead of squeezing every
+  column. Display math (`$$…$$`) from `latexBuilder` scrolls horizontally
+  instead of overflowing.
+- `AutoScroll` follows a `trigger` even when nothing else schedules a frame.
 - Already-settled blocks now pick up a new `styleSheet` (e.g. a theme switch
   mid-stream).
 - The word-faded paragraph uses the resolved style sheet for bold, italic,
@@ -113,6 +133,8 @@ No code changes are required for most apps. Check these if they apply:
 - `IncrementalMarkdownBody.blockSpacing`.
 - `MarkdownStream.wordFadeDuration`, `WordFadeText.fadeDuration` and
   `WordFadeText.fadeCurve`.
+- `MarkdownStream.tableColumnMaxWidth`.
+- `SafeMarkdownParser.escapeSingleTildes`.
 - `IncrementalMarkdownBody.settleDuration` and
   `IncrementalMarkdownBody.tailSettled`.
 

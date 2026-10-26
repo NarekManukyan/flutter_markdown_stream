@@ -128,6 +128,7 @@ class MarkdownStream<T> extends StatefulWidget {
     this.wordFadeIn = true,
     this.wordFadeWindow = 4,
     this.wordFadeDuration = kWordFadeDuration,
+    this.tableColumnMaxWidth = 320,
     // --- MarkdownBody pass-through ---
     this.styleSheet,
     this.styleSheetTheme,
@@ -267,6 +268,16 @@ class MarkdownStream<T> extends StatefulWidget {
   /// Position-based fade only (`wordFadeDuration: null`): how many trailing
   /// words are graded from dim to opaque. Defaults to 4.
   final int wordFadeWindow;
+
+  /// Tables scroll sideways instead of squeezing their columns into the
+  /// available width. Each column is as wide as its content, up to this many
+  /// logical pixels; longer cells wrap. Defaults to 320.
+  ///
+  /// Only applies when [styleSheet] does not set
+  /// `MarkdownStyleSheet.tableColumnWidth`. Pass `null` for the old
+  /// behaviour: columns share the available width and the table never
+  /// scrolls.
+  final double? tableColumnMaxWidth;
 
   // ----- MarkdownBody pass-through -------------------------------------------
 
@@ -755,6 +766,7 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
           wordFadeIn: widget.wordFadeIn,
           wordFadeWindow: widget.wordFadeWindow,
           wordFadeDuration: widget.wordFadeDuration,
+          tableColumnMaxWidth: widget.tableColumnMaxWidth,
           textDirection: widget.textDirection,
           styleSheet: widget.styleSheet,
           styleSheetTheme: widget.styleSheetTheme,
@@ -809,6 +821,7 @@ class _MarkdownBodyWithCursor extends StatefulWidget {
     required this.wordFadeIn,
     required this.wordFadeWindow,
     required this.wordFadeDuration,
+    required this.tableColumnMaxWidth,
     required this.textDirection,
     required this.styleSheet,
     required this.styleSheetTheme,
@@ -844,6 +857,7 @@ class _MarkdownBodyWithCursor extends StatefulWidget {
   final bool wordFadeIn;
   final int wordFadeWindow;
   final Duration? wordFadeDuration;
+  final double? tableColumnMaxWidth;
   final TextDirection? textDirection;
   final MarkdownStyleSheet? styleSheet;
   final MarkdownStyleSheetBaseTheme? styleSheetTheme;
@@ -888,7 +902,7 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
   @override
   void didUpdateWidget(covariant _MarkdownBodyWithCursor oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!widget.fadeInEnabled) {
+    if (!widget.fadeInEnabled || widget.wordFadeIn) {
       _fadeController?.dispose();
       _fadeController = null;
       return;
@@ -925,6 +939,9 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
 
   Widget _applyFade(Widget child) {
     if (!widget.fadeInEnabled) return child;
+    // The word fade already fades the newest text; masking the bottom edge
+    // on top of it greys out the whole last line and hides the word fade.
+    if (widget.wordFadeIn) return child;
     if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) return child;
     _ensureController();
     final ctrl = _fadeController!;
@@ -980,7 +997,7 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
   Widget _buildBody(String data) => MarkdownBody(
         data: data,
         selectable: widget.selectable,
-        styleSheet: widget.styleSheet,
+        styleSheet: _bodyStyleSheet(),
         styleSheetTheme: widget.styleSheetTheme,
         syntaxHighlighter: widget.syntaxHighlighter,
         onTapLink: widget.onTapLink,
@@ -999,6 +1016,19 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
         shrinkWrap: widget.shrinkWrap,
         softLineBreak: widget.softLineBreak,
       );
+
+  /// [MarkdownStream.styleSheet] with scrollable table columns, unless the
+  /// caller chose a column width or turned scrolling off.
+  MarkdownStyleSheet? _bodyStyleSheet() {
+    final maxWidth = widget.tableColumnMaxWidth;
+    final sheet = widget.styleSheet;
+    if (maxWidth == null || sheet?.tableColumnWidth != null) return sheet;
+    return (sheet ?? MarkdownStyleSheet()).copyWith(
+      tableColumnWidth: _CappedIntrinsicColumnWidth(maxWidth),
+      // copyWith drops this field when it is not passed again.
+      tableScrollbarThumbVisibility: sheet?.tableScrollbarThumbVisibility,
+    );
+  }
 
   /// Resolves the style sheet `MarkdownBody` itself would use, so the fading
   /// tail is styled exactly like the same paragraph once it settles.
@@ -1048,7 +1078,10 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
   Widget build(BuildContext context) {
     final streaming = !widget.state.isDone;
     final cursor = streaming ? widget.cursorWidget : null;
-    var data = widget.state.text;
+    var data = SafeMarkdownParser.escapeSingleTildes(
+      widget.state.text,
+      latexEnabled: widget.latexEnabled,
+    );
     if (cursor != null) {
       data = _appendCursorSentinel(data);
       _inlineSyntaxes = <md.InlineSyntax>[
@@ -1096,6 +1129,32 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
       children: <Widget>[faded, errorBuilder(context, error)],
     );
   }
+}
+
+/// Sizes a table column to its widest cell, capped at [maxWidth] so long
+/// cells wrap. Extends [IntrinsicColumnWidth] because `MarkdownBody` only
+/// puts a table in a horizontal scroll view for intrinsic or fixed widths.
+/// Equality by value keeps `MarkdownBody` from re-parsing on every rebuild.
+class _CappedIntrinsicColumnWidth extends IntrinsicColumnWidth {
+  const _CappedIntrinsicColumnWidth(this.maxWidth);
+
+  final double maxWidth;
+
+  @override
+  double maxIntrinsicWidth(Iterable<RenderBox> cells, double containerWidth) {
+    final widest = super.maxIntrinsicWidth(cells, containerWidth);
+    if (widest <= maxWidth) return widest;
+    // Never narrower than the longest unbreakable word.
+    final narrowest = super.minIntrinsicWidth(cells, containerWidth);
+    return narrowest > maxWidth ? narrowest : maxWidth;
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is _CappedIntrinsicColumnWidth && other.maxWidth == maxWidth;
+
+  @override
+  int get hashCode => Object.hash(_CappedIntrinsicColumnWidth, maxWidth);
 }
 
 /// Marks where the cursor goes in the projected text. Starts with a Unicode

@@ -83,6 +83,26 @@ class ChatBubble extends StatelessWidget {
 }
 ```
 
+### Keep the stream instance stable
+
+`MarkdownStream` restarts whenever it gets a different `stream` object: it
+cancels the old subscription, clears the text and listens to the new stream.
+Creating the stream inside `build` therefore starts the request again on
+every rebuild:
+
+```dart
+// Wrong: a rebuild (theme change, keyboard, parent setState) re-subscribes
+// and the answer starts over.
+Widget build(BuildContext context) =>
+    MarkdownStream(stream: api.streamAnswer(prompt));
+```
+
+Create the stream once, for example in `initState` or in your state
+management layer, and pass the same instance on every build. A
+`StreamController.broadcast()` or a stored `Stream` both work. To restart on
+purpose, pass a new stream (or use `StreamingTextController.restart()` with a
+`streamFactory`).
+
 ## Streaming feel & chat-UI helpers (0.5.0)
 
 ### Smooth by default
@@ -257,6 +277,7 @@ MarkdownStream(
 | Partial image                     | `see ![chart](ht`             | `see `                 |
 | Partial autolink                  | `visit <https://exa`          | `visit `               |
 | Unclosed strikethrough            | `gone ~~away`                 | `gone ~~away~~`        |
+| Single `~` in a range             | `20~25 and 30~40`             | plain tildes, no strikethrough |
 | Intra-word underscore             | `snake_case_var`              | left alone             |
 | Delimiters in code / URLs         | `` `a*b` `` or `x.com/_id`    | left alone             |
 | Escaped delimiters                | `\*not bold`                   | left alone             |
@@ -392,6 +413,7 @@ thing with `MarkdownStream`.
 | `cursorWidget`    | Shown inline after the last character while streaming. |
 | `rebuildDebounce` | Coalesces bursts of tokens; default 16ms.             |
 | `codeBuilder`     | Sugar for a block-code builder. See below.           |
+| `tableColumnMaxWidth` | Tables scroll sideways; columns fit their content up to this width (default 320). `null` restores flex columns. |
 
 ### All `MarkdownBody` parameters, passed through
 
