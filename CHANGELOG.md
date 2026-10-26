@@ -1,5 +1,64 @@
 # Changelog
 
+## Unreleased
+
+Correctness and rendering fixes, plus per-block rendering for long answers.
+
+### Fixed — sanitizer
+
+- Delimiters inside inline code, backslash escapes, bare URLs and link
+  destinations no longer get a stray closer appended (`` `a*b` ``,
+  `https://x.com/_id`, `\*`, `` `$HOME` `` with LaTeX on).
+- Code spans of any backtick length are matched (``` ``foo`bar`` ```).
+- An opener in an earlier, finished paragraph, list item or heading no longer
+  gets a closer appended at the very end of the text.
+- An unclosed emphasis run before a code block no longer corrupts the fence
+  line below it.
+- Closers are appended innermost-first (`~~a **b` → `~~a **b**~~`).
+- Fences indented inside list items are recognised and closed at the same
+  indentation. A fence line with an info string no longer closes a block.
+- Emphasis characters inside LaTeX math are ignored.
+
+### Changed
+
+- A partially-typed link shows its label as plain text until the URL completes
+  (`see [docs](ht` → `see docs`) instead of hiding it. Partial images,
+  including `![alt` before the `](`, are still hidden.
+- The cursor is now rendered **inline**, right after the last character. After
+  a code block, table or rule it sits on its own line below.
+- With `wordFadeIn` or `incrementalParsing`, the text is rendered as one keyed
+  `MarkdownBody` per top-level block, and this structure is kept after the
+  stream completes. Finishing no longer re-parses the whole response, and
+  settled blocks are spaced with the style sheet's `blockSpacing`.
+- Block splitting no longer separates items of a loose list or an indented
+  continuation from its list item, and text with link-reference or footnote
+  definitions is kept in one block.
+- `StreamingTextController.restart()` without a `streamFactory` reports the
+  error through `FlutterError.reportError` instead of throwing inside the
+  controller's listener.
+
+### Fixed — rendering
+
+- Already-settled blocks now pick up a new `styleSheet` (e.g. a theme switch
+  mid-stream).
+- The word-faded paragraph uses the resolved style sheet for bold, italic,
+  strikethrough and inline code, so it no longer changes look when it settles.
+  It also parses GitHub-flavoured inline syntax (`~~`) like `MarkdownBody`.
+- Paragraphs with links, URLs or images, LaTeX (when enabled), custom inline
+  syntaxes or custom inline builders skip the word fade and render through
+  `MarkdownBody`, so links stay tappable and custom rendering is not bypassed.
+- A stream error now leaves the controller in `StreamingState.error` (it was
+  overwritten with `completed`).
+- Swapping `config: null` for an equivalent explicit smoothing config no
+  longer restarts the smoother.
+
+### Added
+
+- `onError` callback and `errorBuilder` for stream errors.
+- `WordFadeText.styleSheet`, `WordFadeText.trailing` and
+  `WordFadeText.renderedTags`.
+- `IncrementalMarkdownBody.blockSpacing`.
+
 ## 0.5.0
 
 New streaming feel, chat-UI helpers, performance, and correctness fixes.

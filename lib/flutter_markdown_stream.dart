@@ -42,6 +42,8 @@ export 'src/markdown_stream.dart'
         CodeBlockBuilder,
         MarkdownStream,
         MarkdownStreamDoneCallback,
+        MarkdownStreamErrorBuilder,
+        MarkdownStreamErrorCallback,
         MarkdownStreamFactory;
 export 'src/output_smoother.dart' show OutputSmoother;
 export 'src/safe_markdown_parser.dart' show SafeMarkdownParser;

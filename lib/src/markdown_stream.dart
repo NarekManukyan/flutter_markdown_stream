@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart' show CupertinoTheme;
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show Theme;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:markdown/markdown.dart' as md;
@@ -23,6 +26,18 @@ typedef ChunkToText<T> = String Function(T chunk);
 
 /// Factory for producing a fresh stream on [StreamingTextController.restart].
 typedef MarkdownStreamFactory<T> = Stream<T> Function();
+
+/// Signature for the `onError` callback.
+typedef MarkdownStreamErrorCallback = void Function(
+  Object error,
+  StackTrace stackTrace,
+);
+
+/// Builds a widget shown below the rendered text after the stream failed.
+typedef MarkdownStreamErrorBuilder = Widget Function(
+  BuildContext context,
+  Object error,
+);
 
 /// A Markdown widget that renders progressively from a stream of token
 /// chunks.
@@ -97,6 +112,8 @@ class MarkdownStream<T> extends StatefulWidget {
     // --- stream-specific ---
     this.onDone,
     this.onTextChanged,
+    this.onError,
+    this.errorBuilder,
     this.cursorWidget,
     this.rebuildDebounce = const Duration(milliseconds: 16),
     this.codeBuilder,
@@ -159,8 +176,22 @@ class MarkdownStream<T> extends StatefulWidget {
   /// the render hot path.
   final MarkdownStreamDoneCallback? onTextChanged;
 
-  /// Optional widget appended to the end of the rendered Markdown while
-  /// the stream is still open. A typical choice is `BlinkingCursor()`.
+  /// Called when [stream] emits an error. The text received so far stays on
+  /// screen, the controller (if any) moves to [StreamingState.error], and
+  /// [onDone] still fires afterwards with the partial text.
+  final MarkdownStreamErrorCallback? onError;
+
+  /// Optional widget shown below the rendered text after [stream] emitted an
+  /// error — e.g. a "Response interrupted, retry" row.
+  final MarkdownStreamErrorBuilder? errorBuilder;
+
+  /// Optional widget shown at the end of the rendered Markdown while the
+  /// stream is still open. A typical choice is `BlinkingCursor()`.
+  ///
+  /// The cursor sits inline, right after the last character, when the text
+  /// ends inside a paragraph, heading, list item or blockquote. After a
+  /// block that cannot hold inline content (a code block, table or rule) it
+  /// is placed on its own line below.
   final Widget? cursorWidget;
 
   /// Minimum time between rebuilds. Bursts of tokens inside a debounce
@@ -297,21 +328,30 @@ class MarkdownStream<T> extends StatefulWidget {
 /// Immutable render-time state.
 @immutable
 class _RenderState {
-  const _RenderState({required this.text, required this.isDone});
+  const _RenderState({required this.text, required this.isDone, this.error});
 
   final String text;
   final bool isDone;
 
+  /// The error the stream failed with, or `null`.
+  final Object? error;
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is _RenderState && other.text == text && other.isDone == isDone);
+      (other is _RenderState &&
+          other.text == text &&
+          other.isDone == isDone &&
+          other.error == error);
 
   @override
-  int get hashCode => Object.hash(text, isDone);
+  int get hashCode => Object.hash(text, isDone, error);
 
-  _RenderState copyWith({String? text, bool? isDone}) =>
-      _RenderState(text: text ?? this.text, isDone: isDone ?? this.isDone);
+  _RenderState copyWith({String? text, bool? isDone}) => _RenderState(
+        text: text ?? this.text,
+        isDone: isDone ?? this.isDone,
+        error: error,
+      );
 }
 
 class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
@@ -392,12 +432,13 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
   }
 
   bool _smoothingConfigChanged(MarkdownStream<T> oldWidget) {
-    final a = oldWidget.config;
-    final b = widget.config;
-    return (a?.smoothingEnabled ?? false) != (b?.smoothingEnabled ?? false) ||
-        (a?.charsPerSecond ?? 0) != (b?.charsPerSecond ?? 0) ||
-        (a?.smoothingMaxBacklogChars ?? 0) !=
-            (b?.smoothingMaxBacklogChars ?? 0);
+    // Compare effective configs: a null config means the smoothing default,
+    // so swapping `null` for an equivalent explicit config is not a change.
+    final a = oldWidget.config ?? _kDefaultConfig;
+    final b = _effectiveConfig;
+    return a.smoothingEnabled != b.smoothingEnabled ||
+        a.charsPerSecond != b.charsPerSecond ||
+        a.smoothingMaxBacklogChars != b.smoothingMaxBacklogChars;
   }
 
   // --- controller plumbing ---------------------------------------------------
@@ -479,10 +520,18 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
   void _handleRestart() {
     final factory = widget.streamFactory;
     if (factory == null) {
-      throw StateError(
-        'StreamingTextController.restart() requires MarkdownStream to be '
-        'constructed with a streamFactory.',
+      // Reported rather than thrown: this runs inside the controller's
+      // notifyListeners, where a throw would abort the remaining listeners.
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: StateError(
+            'StreamingTextController.restart() requires MarkdownStream to be '
+            'constructed with a streamFactory.',
+          ),
+          library: 'flutter_markdown_stream',
+        ),
       );
+      return;
     }
     _sub?.cancel();
     _debounceTimer?.cancel();
@@ -570,7 +619,14 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
     }
   }
 
-  void _onStreamDone() {
+  void _onStreamDone() => _finish();
+
+  void _onStreamError(Object error, StackTrace stackTrace) {
+    widget.onError?.call(error, stackTrace);
+    _finish(error: error);
+  }
+
+  void _finish({Object? error}) {
     _debounceTimer?.cancel();
     // Intentional: on completion we snap straight to the full text rather than
     // letting the smoother drain its backlog over `finishDuration`. Once the
@@ -578,14 +634,11 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
     // more seconds of paced reveal. Tearing the smoother down first also stops
     // a late tick from overwriting the final, fully-rendered text.
     _teardownSmoother();
-    _renderNow(done: true);
+    _renderNow(done: true, error: error);
     widget.onDone?.call(_raw.toString());
-    _controller?.internalSetState(StreamingState.completed);
-  }
-
-  void _onStreamError(Object _, StackTrace __) {
-    _controller?.internalSetState(StreamingState.error);
-    _onStreamDone();
+    _controller?.internalSetState(
+      error == null ? StreamingState.completed : StreamingState.error,
+    );
   }
 
   Duration get _effectiveDebounce {
@@ -610,20 +663,24 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
     _debounceTimer = Timer(d, _renderNow);
   }
 
-  void _renderNow({bool done = false}) {
+  void _renderNow({bool done = false, Object? error}) {
     _pendingRender = false;
     if (!mounted) return;
     final raw = _raw.toString();
     final latex = widget.latexBuilder != null;
     final nextText =
         done ? raw : SafeMarkdownParser.sanitize(raw, latexEnabled: latex);
-    _emitText(nextText, done: done);
+    _emitText(nextText, done: done, error: error);
   }
 
   /// Single funnel for every render-text update: pushes the new state, mirrors
   /// it onto the controller, and fires [MarkdownStream.onTextChanged].
-  void _emitText(String text, {required bool done}) {
-    _state.value = _state.value.copyWith(text: text, isDone: done);
+  void _emitText(String text, {required bool done, Object? error}) {
+    _state.value = _RenderState(
+      text: text,
+      isDone: done,
+      error: error ?? _state.value.error,
+    );
     _controller?.internalSetCurrentText(text);
     widget.onTextChanged?.call(text);
   }
@@ -703,9 +760,14 @@ class _MarkdownStreamState<T> extends State<MarkdownStream<T>> {
           softLineBreak: widget.softLineBreak,
           selectable: widget.selectable,
           cursorWidget: widget.cursorWidget,
+          errorBuilder: widget.errorBuilder,
+          latexEnabled: widget.latexBuilder != null,
+          hasCustomInlineRendering:
+              (widget.inlineSyntaxes?.isNotEmpty ?? false) ||
+                  widget.builders.keys.any(WordFadeText.renderedTags.contains),
           fadeInEnabled: config?.fadeInEnabled ?? false,
-          fadeInDuration: config?.fadeInDuration ??
-              const Duration(milliseconds: 300),
+          fadeInDuration:
+              config?.fadeInDuration ?? const Duration(milliseconds: 300),
           fadeInCurve: config?.fadeInCurve ?? Curves.easeOut,
           trailingFadeHeight: config?.trailingFadeHeight ?? 40,
         ),
@@ -751,6 +813,9 @@ class _MarkdownBodyWithCursor extends StatefulWidget {
     required this.softLineBreak,
     required this.selectable,
     required this.cursorWidget,
+    required this.errorBuilder,
+    required this.latexEnabled,
+    required this.hasCustomInlineRendering,
     required this.fadeInEnabled,
     required this.fadeInDuration,
     required this.fadeInCurve,
@@ -782,6 +847,12 @@ class _MarkdownBodyWithCursor extends StatefulWidget {
   final bool softLineBreak;
   final bool selectable;
   final Widget? cursorWidget;
+  final MarkdownStreamErrorBuilder? errorBuilder;
+  final bool latexEnabled;
+
+  /// Whether the caller supplied inline syntaxes or builders for inline tags
+  /// that [WordFadeText] cannot reproduce; the fading tail is skipped then.
+  final bool hasCustomInlineRendering;
   final bool fadeInEnabled;
   final Duration fadeInDuration;
   final Curve fadeInCurve;
@@ -848,7 +919,11 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
           blendMode: BlendMode.dstIn,
           shaderCallback: (bounds) {
             final h = bounds.height;
-            if (h <= 0) return const LinearGradient(colors: [Color(0xFFFFFFFF), Color(0xFFFFFFFF)]).createShader(bounds);
+            if (h <= 0) {
+              return const LinearGradient(
+                colors: [Color(0xFFFFFFFF), Color(0xFFFFFFFF)],
+              ).createShader(bounds);
+            }
             // Fade occupies the bottom `trailingFadeHeight * t` pixels.
             final fadeH = widget.trailingFadeHeight * t;
             final opaqueStop = (1 - fadeH / h).clamp(0.0, 1.0);
@@ -869,6 +944,12 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
     );
   }
 
+  // Inline syntaxes and builders for the current frame, including the cursor
+  // syntax while a cursor is shown. Set at the top of [build].
+  List<md.InlineSyntax>? _inlineSyntaxes;
+  Map<String, MarkdownElementBuilder> _builders =
+      const <String, MarkdownElementBuilder>{};
+
   /// Builds a `MarkdownBody` for [data] with the current styling. Used both
   /// for the whole text and, under incremental parsing, for each slice.
   Widget _buildBody(String data) => MarkdownBody(
@@ -881,12 +962,12 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
         onTapText: widget.onTapText,
         imageDirectory: widget.imageDirectory,
         blockSyntaxes: widget.blockSyntaxes,
-        inlineSyntaxes: widget.inlineSyntaxes,
+        inlineSyntaxes: _inlineSyntaxes,
         extensionSet: widget.extensionSet,
         imageBuilder: widget.imageBuilder,
         checkboxBuilder: widget.checkboxBuilder,
         bulletBuilder: widget.bulletBuilder,
-        builders: widget.builders,
+        builders: _builders,
         paddingBuilders: widget.paddingBuilders,
         listItemCrossAxisAlignment: widget.listItemCrossAxisAlignment,
         fitContent: widget.fitContent,
@@ -894,63 +975,147 @@ class _MarkdownBodyWithCursorState extends State<_MarkdownBodyWithCursor>
         softLineBreak: widget.softLineBreak,
       );
 
+  /// Resolves the style sheet `MarkdownBody` itself would use, so the fading
+  /// tail is styled exactly like the same paragraph once it settles.
+  MarkdownStyleSheet _resolvedStyleSheet(BuildContext context) {
+    final useCupertino = switch (widget.styleSheetTheme) {
+      MarkdownStyleSheetBaseTheme.cupertino => true,
+      MarkdownStyleSheetBaseTheme.platform =>
+        defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.macOS,
+      _ => false,
+    };
+    final base = useCupertino
+        ? MarkdownStyleSheet.fromCupertinoTheme(CupertinoTheme.of(context))
+        : MarkdownStyleSheet.fromTheme(Theme.of(context));
+    return base.merge(widget.styleSheet);
+  }
+
+  /// Whether the active paragraph [data] can be rendered by [WordFadeText]
+  /// without losing anything `MarkdownBody` would show.
+  bool _canFade(String data) =>
+      !widget.hasCustomInlineRendering &&
+      !(widget.latexEnabled && data.contains(r'$')) &&
+      WordFadeText.isSimpleParagraph(data);
+
   /// Builds the active (streaming) paragraph with a per-word fade when it is a
   /// plain paragraph; otherwise falls back to a normal MarkdownBody.
   Widget _buildFadingTail(BuildContext context, String data) {
-    if (!WordFadeText.isSimpleParagraph(data)) return _buildBody(data);
-    final base = widget.styleSheet?.p ?? DefaultTextStyle.of(context).style;
+    final hasCursor = data.endsWith(_kCursorSentinel);
+    final text = hasCursor
+        ? data.substring(0, data.length - _kCursorSentinel.length)
+        : data;
+    if (!_canFade(text)) return _buildBody(data);
+    final sheet = _resolvedStyleSheet(context);
     return WordFadeText(
-      text: data,
-      baseStyle: base,
+      text: text,
+      baseStyle: sheet.p ?? DefaultTextStyle.of(context).style,
+      styleSheet: sheet,
       isDone: widget.state.isDone,
       textDirection: widget.textDirection,
       fadeWindow: widget.wordFadeWindow,
+      trailing: hasCursor ? widget.cursorWidget : null,
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final streaming = !widget.state.isDone;
+    final cursor = streaming ? widget.cursorWidget : null;
+    var data = widget.state.text;
+    if (cursor != null) {
+      data = _appendCursorSentinel(data);
+      _inlineSyntaxes = <md.InlineSyntax>[
+        _CursorSyntax(),
+        ...?widget.inlineSyntaxes,
+      ];
+      _builders = <String, MarkdownElementBuilder>{
+        ...widget.builders,
+        _kCursorTag: _CursorBuilder(cursor),
+      };
+    } else {
+      _inlineSyntaxes = widget.inlineSyntaxes;
+      _builders = widget.builders;
+    }
+
     final Widget body;
-    if (widget.wordFadeIn && streaming) {
-      // Settled blocks at full opacity; the active paragraph fades per word.
+    if (widget.wordFadeIn || widget.incrementalParsing) {
+      // One keyed MarkdownBody per top-level block. The same structure is
+      // kept after the stream completes, so finishing does not re-parse the
+      // whole response or rebuild the settled blocks.
       body = IncrementalMarkdownBody(
-        data: widget.state.text,
+        data: data,
         sliceBuilder: _buildBody,
-        tailBuilder: (data) => _buildFadingTail(context, data),
-      );
-    } else if (widget.incrementalParsing && streaming) {
-      // Incremental parsing only pays off while streaming; once done we render
-      // the whole thing once through a single MarkdownBody.
-      body = IncrementalMarkdownBody(
-        data: widget.state.text,
-        sliceBuilder: _buildBody,
+        tailBuilder: widget.wordFadeIn && streaming
+            ? (tail) => _buildFadingTail(context, tail)
+            : null,
+        blockSpacing: widget.styleSheet?.blockSpacing ?? 8,
       );
     } else {
-      body = _buildBody(widget.state.text);
+      body = _buildBody(data);
     }
     final faded = _applyFade(body);
-    if (widget.state.isDone || widget.cursorWidget == null) {
-      return faded;
-    }
-    // Stretch the cross axis so the MarkdownBody fills the full available
-    // width. This makes `TextAlign.start` inside each RichText resolve
-    // correctly against the ambient Directionality (right in RTL) — with
-    // CrossAxisAlignment.start, short content would instead shrink to its
-    // intrinsic width and get positioned at the parent's LTR start.
+
+    final error = widget.state.error;
+    final errorBuilder = widget.errorBuilder;
+    if (error == null || errorBuilder == null) return faded;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        faded,
-        Align(
-          alignment: AlignmentDirectional.topStart,
-          child: Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: widget.cursorWidget,
-          ),
-        ),
-      ],
+      children: <Widget>[faded, errorBuilder(context, error)],
+    );
+  }
+}
+
+/// Marks where the cursor goes in the projected text. Starts with a Unicode
+/// punctuation character so an emphasis closer right before it (`_word_`)
+/// still counts as right-flanking; the private-use second character makes a
+/// collision with real model output practically impossible.
+const String _kCursorSentinel = '⸻';
+
+const String _kCursorTag = 'x-stream-cursor';
+
+// A last line that cannot hold inline content: a table row, a thematic break
+// or setext underline, or display math.
+final RegExp _kBlockOnlyLine = RegExp(r'^\s*(\||\$\$|[-=*_](\s*[-=*_])*\s*$)');
+
+/// Appends the cursor sentinel so the cursor renders inline after the last
+/// character — or, when the text ends with a block that cannot hold inline
+/// content (a closed code fence, a table, a rule), as its own paragraph.
+String _appendCursorSentinel(String text) {
+  if (text.isEmpty) return _kCursorSentinel;
+  if (text.endsWith('\n')) return '$text\n$_kCursorSentinel';
+  final lastLine = text.substring(text.lastIndexOf('\n') + 1);
+  if (_kBlockOnlyLine.hasMatch(lastLine)) return '$text\n\n$_kCursorSentinel';
+  return '$text$_kCursorSentinel';
+}
+
+class _CursorSyntax extends md.InlineSyntax {
+  _CursorSyntax() : super(RegExp.escape(_kCursorSentinel));
+
+  @override
+  bool onMatch(md.InlineParser parser, Match match) {
+    parser.addNode(md.Element.empty(_kCursorTag));
+    return true;
+  }
+}
+
+class _CursorBuilder extends MarkdownElementBuilder {
+  _CursorBuilder(this.cursor);
+
+  final Widget cursor;
+
+  @override
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    // Returned as text so MarkdownBody merges it into the paragraph's
+    // RichText, placing the cursor right after the last character.
+    return Text.rich(
+      WidgetSpan(alignment: PlaceholderAlignment.middle, child: cursor),
     );
   }
 }

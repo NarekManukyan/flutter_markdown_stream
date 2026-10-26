@@ -148,15 +148,16 @@ void main() {
       controller.add('two');
       await tester.pump();
 
-      // Settled prefix + active tail => two MarkdownBody widgets.
-      expect(find.byType(MarkdownBody), findsNWidgets(2));
+      // One keyed MarkdownBody per block: heading, para one, active tail.
+      expect(find.byType(MarkdownBody), findsNWidgets(3));
       expect(tester.takeException(), isNull);
 
       _finish(controller);
       await tester.pump();
 
-      // Once done, a single MarkdownBody renders the whole thing.
-      expect(find.byType(MarkdownBody), findsOneWidget);
+      // Completion keeps the per-block structure instead of re-parsing the
+      // whole response into one body.
+      expect(find.byType(MarkdownBody), findsNWidgets(3));
       expect(tester.takeException(), isNull);
     });
   });
