@@ -23,6 +23,8 @@
 /// previous text, scanning resumes from the last boundary instead of the start.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 
 import 'fence_tracker.dart';
@@ -47,6 +49,8 @@ class IncrementalMarkdownBody extends StatefulWidget {
     required this.sliceBuilder,
     this.tailBuilder,
     this.blockSpacing = 8,
+    this.settleDuration = Duration.zero,
+    this.tailSettled = false,
   });
 
   /// The full sanitized Markdown to render.
@@ -60,6 +64,17 @@ class IncrementalMarkdownBody extends StatefulWidget {
   /// streaming block is built with this instead of [sliceBuilder] — e.g. to
   /// apply a per-word fade to the paragraph currently being typed.
   final MarkdownSliceBuilder? tailBuilder;
+
+  /// How long a block keeps using [tailBuilder] after it stops being the
+  /// active tail, before switching to [sliceBuilder]. Lets an animated tail
+  /// (such as a per-word fade) finish instead of snapping when the next block
+  /// starts or the stream ends. Zero switches immediately.
+  final Duration settleDuration;
+
+  /// Whether the last block is finished too (the stream has ended). It then
+  /// switches to [sliceBuilder] after [settleDuration], like any other
+  /// settled block.
+  final bool tailSettled;
 
   /// Vertical space between blocks. Should match the style sheet's
   /// `blockSpacing` so the split rendering is spaced like a single
@@ -84,10 +99,59 @@ class IncrementalMarkdownBody extends StatefulWidget {
 class _IncrementalMarkdownBodyState extends State<IncrementalMarkdownBody> {
   final _BlockSplitter _splitter = _BlockSplitter();
 
+  // Blocks that recently stopped being the active tail and still render with
+  // the tail builder, each with the timer that ends its settle window.
+  final Map<int, Timer> _settling = <int, Timer>{};
+  int _blockCount = 0;
+  bool _tailWasSettled = false;
+
+  @override
+  void dispose() {
+    for (final timer in _settling.values) {
+      timer.cancel();
+    }
+    super.dispose();
+  }
+
+  void _startSettling(int index) {
+    if (widget.tailBuilder == null || widget.settleDuration <= Duration.zero) {
+      return;
+    }
+    _settling[index]?.cancel();
+    _settling[index] = Timer(widget.settleDuration, () {
+      if (!mounted) return;
+      setState(() => _settling.remove(index));
+    });
+  }
+
+  void _clearSettling() {
+    for (final timer in _settling.values) {
+      timer.cancel();
+    }
+    _settling.clear();
+  }
+
+  void _trackSettling(int count) {
+    if (count < _blockCount || (!widget.tailSettled && _tailWasSettled)) {
+      // The text was replaced or restarted.
+      _clearSettling();
+    } else if (count > _blockCount && _blockCount > 0) {
+      // The previous tail, and any block that came and went within one
+      // update, are now settled.
+      for (var i = _blockCount - 1; i < count - 1; i++) {
+        _startSettling(i);
+      }
+    }
+    if (widget.tailSettled && !_tailWasSettled) _startSettling(count - 1);
+    _blockCount = count;
+    _tailWasSettled = widget.tailSettled;
+  }
+
   @override
   Widget build(BuildContext context) {
     final data = widget.data;
     final starts = _splitter.split(data);
+    _trackSettling(starts.length);
     final tailBuild = widget.tailBuilder ?? widget.sliceBuilder;
     final children = <Widget>[];
     for (var i = 0; i < starts.length; i++) {
@@ -96,13 +160,15 @@ class _IncrementalMarkdownBodyState extends State<IncrementalMarkdownBody> {
         starts[i],
         isTail ? data.length : starts[i + 1],
       );
+      final active =
+          (isTail && !widget.tailSettled) || _settling.containsKey(i);
       if (i > 0) children.add(SizedBox(height: widget.blockSpacing));
       // A stable key per block index keeps each settled block's element (and
       // its parsed Markdown) alive while later blocks stream in.
       children.add(
         KeyedSubtree(
           key: ValueKey<int>(i),
-          child: isTail ? tailBuild(block) : widget.sliceBuilder(block),
+          child: active ? tailBuild(block) : widget.sliceBuilder(block),
         ),
       );
     }

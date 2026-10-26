@@ -35,6 +35,7 @@ Flicker-free, crash-safe streaming Markdown widget for Flutter. Drop it into you
 - One-frame debounce coalesces bursts of tokens into a single rebuild, plus optional **output smoothing** that paces bursty tokens into an even, ChatGPT/Claude-style flow.
 - **Opt-in `AutoScroll`** stick-to-bottom for chat UIs, modelled on Claude mobile (follows the bottom, disengages when you scroll up, never yanks).
 - Ready-made **`CodeBlockView`** with a language label and copy button, or bring your own `codeBuilder`.
+- **Chat essentials:** `MarkdownStream.text` for earlier messages, a collapsible **thinking section** for `<think>` output from reasoning models, a **placeholder** until the first token, and a **link policy** that keeps `javascript:`, `data:` and `file:` links out of model output.
 - Optional **incremental parsing** for long answers — settled blocks are parsed once, not re-parsed every frame.
 - Eight cursor widgets, all screen-reader friendly (`ExcludeSemantics` + optional `semanticLabel`).
 - `onTextChanged` for live progress, and a `StreamingTextController` for pause / resume / skip / restart.
@@ -83,6 +84,103 @@ class ChatBubble extends StatelessWidget {
 }
 ```
 
+### Keep the stream instance stable
+
+`MarkdownStream` restarts whenever it gets a different `stream` object: it
+cancels the old subscription, clears the text and listens to the new stream.
+Creating the stream inside `build` therefore starts the request again on
+every rebuild:
+
+```dart
+// Wrong: a rebuild (theme change, keyboard, parent setState) re-subscribes
+// and the answer starts over.
+Widget build(BuildContext context) =>
+    MarkdownStream(stream: api.streamAnswer(prompt));
+```
+
+Create the stream once, for example in `initState` or in your state
+management layer, and pass the same instance on every build. A
+`StreamController.broadcast()` or a stored `Stream` both work. To restart on
+purpose, pass a new stream (or use `StreamingTextController.restart()` with a
+`streamFactory`).
+
+## Chat messages (0.6.0)
+
+### Earlier messages: `MarkdownStream.text`
+
+Render a finished message with the same widget, styling and block spacing
+as the answer that just streamed in, without a fake one-event stream:
+
+```dart
+MarkdownStream.text(data: message.content, styleSheet: sheet)
+```
+
+To resume an interrupted answer, pass what you already have as
+`initialText` and stream the rest. It shows at once, without pacing:
+
+```dart
+MarkdownStream(stream: resumedStream, initialText: partialAnswer)
+```
+
+### Thinking section
+
+Reasoning models (DeepSeek R1, Qwen, QwQ and others) stream a
+`<think>…</think>` section before the answer. `MarkdownStream` shows it as a
+"Thinking…" header over the thinking text, open while the model thinks. When
+the answer starts it folds to "Thought for 12s", and a tap opens it again.
+Half-typed tags never show up as text.
+
+```dart
+MarkdownStream(stream: llmStream); // on by default
+
+// Your own container; `state.content` is the rendered thinking text.
+MarkdownStream(
+  stream: llmStream,
+  thinkingBuilder: (context, state) => MyThoughts(
+    active: state.isActive,
+    elapsed: state.elapsed,
+    child: state.content,
+  ),
+);
+
+MarkdownStream(stream: llmStream, parseThinking: false); // leave the tags in
+```
+
+### Placeholder before the first token
+
+```dart
+MarkdownStream(
+  stream: llmStream,
+  placeholder: const ShimmerText('Thinking…'),
+  cursorWidget: const BlinkingCursor(),
+);
+```
+
+The placeholder cross-fades to the text when the first chunk arrives.
+`ShimmerText` sweeps a soft highlight across its text and stays still when
+reduce motion is on.
+
+### Safe links and images
+
+Model output is untrusted input. By default only `http`, `https` and
+`mailto` links, relative links, and `http`/`https` images are rendered. A
+`javascript:`, `data:` or `file:` link shows as its label in plain text and
+never reaches `onTapLink`; a blocked image shows its alt text. Tricks like
+`javascript&#58;` or `java\tscript:` are caught too.
+
+```dart
+// Also allow your own deep links:
+MarkdownStream(
+  stream: llmStream,
+  linkPolicy: const LinkPolicy(linkSchemes: {'http', 'https', 'myapp'}),
+);
+
+MarkdownStream(stream: llmStream, linkPolicy: null); // no filtering
+```
+
+Relative image paths are blocked unless you set `imageDirectory`, because
+`MarkdownBody` loads them from the local file system.
+
 ## Streaming feel & chat-UI helpers (0.5.0)
 
 ### Smooth by default
@@ -101,13 +199,24 @@ MarkdownStream(
 ### Per-word fade-in (`wordFadeIn`)
 
 The words in the paragraph currently being streamed fade in (opacity only, no
-blur) as they arrive — settled text stays full-fidelity, and everything is
-opaque once the stream completes.
+blur) as they arrive. Each word fades over `wordFadeDuration` (300ms) with a
+strong ease-out, so words finish fading even while the stream pauses. A
+finished paragraph, and the last one when the stream completes, keeps fading
+until its last word is opaque before it settles. With reduce motion on, words
+appear at full opacity.
 
 ```dart
 MarkdownStream(stream: llmStream);                 // on by default
-MarkdownStream(stream: llmStream, wordFadeWindow: 6); // longer, softer fade
+MarkdownStream(
+  stream: llmStream,
+  wordFadeDuration: const Duration(milliseconds: 450), // slower fade
+);
+// The 0.5 position-based ramp (the last `wordFadeWindow` words stay faded):
+MarkdownStream(stream: llmStream, wordFadeDuration: null, wordFadeWindow: 6);
 ```
+
+`BlinkingCursor` and `BarCursor` stay solid while text arrives and blink only
+while the stream waits.
 
 It applies to prose (with inline bold/italic/code/links); code blocks, tables,
 lists, headings, and blockquotes stream without a fade.
@@ -246,6 +355,7 @@ MarkdownStream(
 | Partial image                     | `see ![chart](ht`             | `see `                 |
 | Partial autolink                  | `visit <https://exa`          | `visit `               |
 | Unclosed strikethrough            | `gone ~~away`                 | `gone ~~away~~`        |
+| Single `~` in a range             | `20~25 and 30~40`             | plain tildes, no strikethrough |
 | Intra-word underscore             | `snake_case_var`              | left alone             |
 | Delimiters in code / URLs         | `` `a*b` `` or `x.com/_id`    | left alone             |
 | Escaped delimiters                | `\*not bold`                   | left alone             |
@@ -381,6 +491,12 @@ thing with `MarkdownStream`.
 | `cursorWidget`    | Shown inline after the last character while streaming. |
 | `rebuildDebounce` | Coalesces bursts of tokens; default 16ms.             |
 | `codeBuilder`     | Sugar for a block-code builder. See below.           |
+| `initialText`     | Text shown at once before the stream, e.g. to resume an answer. |
+| `placeholder`     | Shown until the first chunk arrives.                 |
+| `parseThinking`   | Render a leading `<think>` section as a collapsible block (default on). |
+| `thinkingBuilder` | Custom widget for the thinking section.              |
+| `linkPolicy`      | Which link and image schemes are allowed.            |
+| `tableColumnMaxWidth` | Tables scroll sideways; columns fit their content up to this width (default 320). `null` restores flex columns. |
 
 ### All `MarkdownBody` parameters, passed through
 

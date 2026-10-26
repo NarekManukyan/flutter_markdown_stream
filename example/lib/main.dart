@@ -87,6 +87,7 @@ class HomeScreen extends StatelessWidget {
       ('Auto scroll', const AutoScrollScreen()),
       ('Code block', const CodeBlockScreen()),
       ('Cursors', const CursorsScreen()),
+      ('Chat features', const ChatFeaturesScreen()),
     ];
     return Scaffold(
       appBar: AppBar(title: const Text('Markdown Stream Demo')),
@@ -355,6 +356,103 @@ class _AutoScrollScreenState extends State<AutoScrollScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// An earlier message, rendered with `MarkdownStream.text`: same look as a
+/// finished stream, nothing animates, and its thinking section starts folded.
+const String _historyMessage = '''<think>
+The user wants a quick comparison. Keep it short and use a table.
+</think>
+
+Here is how the two plans compare:
+
+| Plan | Price | Seats |
+| --- | --- | --- |
+| Starter | 9 EUR / month | 1~3 |
+| Team | 29 EUR / month | 5~20 |
+
+Questions? See [the pricing page](https://example.com/pricing).
+''';
+
+/// A reasoning-model answer: a `<think>` section, then the answer, with one
+/// link the default `LinkPolicy` blocks.
+const List<String> _thinkingChunks = <String>[
+  '<think>',
+  'The user asks for ',
+  'a packing list. ',
+  'Weather is mild, ',
+  'so layers matter ',
+  'more than a heavy coat.',
+  '</think>\n\n',
+  '## Packing list\n\n',
+  '- Light jacket\n',
+  '- Two sweaters\n',
+  '- Walking shoes\n\n',
+  'Temperatures run 12~18 °C. ',
+  'This [tracking link](javascript:alert(1)) ',
+  'is shown as plain text.',
+];
+
+Stream<String> _thinkingStream() async* {
+  // Time to first token, so the placeholder has a moment on screen.
+  await Future<void>.delayed(const Duration(milliseconds: 1200));
+  for (final c in _thinkingChunks) {
+    await Future<void>.delayed(const Duration(milliseconds: 220));
+    yield c;
+  }
+}
+
+class ChatFeaturesScreen extends StatefulWidget {
+  const ChatFeaturesScreen({super.key});
+
+  @override
+  State<ChatFeaturesScreen> createState() => _ChatFeaturesScreenState();
+}
+
+class _ChatFeaturesScreenState extends State<ChatFeaturesScreen> {
+  Stream<String>? _stream;
+  String _status = 'IDLE';
+
+  void _start() => setState(() {
+        _status = 'STREAMING';
+        _stream = _thinkingStream();
+      });
+
+  @override
+  Widget build(BuildContext context) {
+    final stream = _stream;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Chat features'),
+        actions: [
+          TextButton(
+            onPressed: _start,
+            child: Text(stream == null ? 'Ask' : 'Ask again'),
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Text('MRK_STATUS_$_status'),
+          const Divider(),
+          MarkdownStream.text(data: _historyMessage, fitContent: false),
+          const Divider(height: 32),
+          if (stream != null)
+            MarkdownStream(
+              key: ValueKey<int>(stream.hashCode),
+              stream: stream,
+              fitContent: false,
+              placeholder: const ShimmerText('Thinking…'),
+              cursorWidget: const BlinkingCursor(),
+              onTapLink: (text, href, title) => ScaffoldMessenger.of(context)
+                  .showSnackBar(SnackBar(content: Text('Open $href'))),
+              onDone: (_) => setState(() => _status = 'DONE'),
+            ),
+        ],
       ),
     );
   }

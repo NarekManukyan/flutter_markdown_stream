@@ -36,6 +36,7 @@ export 'src/latex_syntax.dart'
         LaTeXElementBuilder,
         LaTeXInlineSyntax,
         kLatexTag;
+export 'src/link_policy.dart' show LinkPolicy;
 export 'src/markdown_stream.dart'
     show
         ChunkToText,
@@ -49,6 +50,8 @@ export 'src/output_smoother.dart' show OutputSmoother;
 export 'src/safe_markdown_parser.dart' show SafeMarkdownParser;
 export 'src/stream_adapters.dart' show StreamAdapters;
 export 'src/streaming_config.dart' show StreamingPresets, StreamingTextConfig;
+export 'src/thinking.dart'
+    show ShimmerText, ThinkingBlock, ThinkingBuilder, ThinkingState;
 export 'src/word_fade.dart' show WordFadeText;
 export 'src/streaming_text_controller.dart'
     show
