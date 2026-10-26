@@ -1,8 +1,35 @@
 # Changelog
 
-## Unreleased
+## 0.6.0
 
 Correctness and rendering fixes, plus per-block rendering for long answers.
+
+### Migrating from 0.5.x
+
+No code changes are required for most apps. Check these if they apply:
+
+- **Cursor position.** `cursorWidget` now renders inline after the last
+  character instead of on its own line. A tall or wide custom cursor (for
+  example a typing-dots row) now affects the height of the last text line. If
+  you want it below the text, render it yourself under `MarkdownStream` while
+  the stream is active and leave `cursorWidget` null.
+- **Widget tests that count `MarkdownBody`.** With `wordFadeIn` (the default)
+  or `incrementalParsing`, there is one `MarkdownBody` per top-level block,
+  during streaming and after completion. `find.byType(MarkdownBody)` no
+  longer finds exactly one widget for multi-block text. Finders on text
+  (`find.text`, `find.textContaining`) are unaffected.
+  `IncrementalMarkdownBody` always returns a `Column`, even for one block.
+- **`StreamingTextController.restart()` without a `streamFactory`** no longer
+  throws from the controller. The `StateError` goes to `FlutterError.onError`
+  and the call does nothing. Code that caught the exception should pass a
+  `streamFactory` instead.
+- **Partial links** show their label while the URL is still streaming.
+  Snapshot or golden tests that captured mid-stream frames with a half-typed
+  link need updating.
+- **Stream errors.** `onDone` still fires after an error, as before. The
+  controller now ends in `StreamingState.error` rather than `completed`, so
+  code that waits for `completed` after an error should also accept `error`
+  (`StreamingState.isFinished` covers both).
 
 ### Fixed — sanitizer
 

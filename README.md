@@ -44,7 +44,7 @@ Flicker-free, crash-safe streaming Markdown widget for Flutter. Drop it into you
 
 ```yaml
 dependencies:
-  flutter_markdown_stream: ^0.5.0
+  flutter_markdown_stream: ^0.6.0
 ```
 
 ## Usage
