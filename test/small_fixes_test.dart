@@ -88,6 +88,8 @@ void main() {
         expect(esc(s), s);
       }
       expect(esc(r'$x_1~2$', latex: true), r'$x_1~2$');
+      // CRLF line endings: the fence must still be recognised.
+      expect(esc('```\r\n20~25\r\n```\r\n'), '```\r\n20~25\r\n```\r\n');
       expect(esc(r'$x_1~2$'), r'$x_1\~2$');
     });
 

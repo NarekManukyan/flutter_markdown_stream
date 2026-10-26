@@ -103,7 +103,9 @@ class _IncrementalMarkdownBodyState extends State<IncrementalMarkdownBody> {
   // the tail builder, each with the timer that ends its settle window.
   final Map<int, Timer> _settling = <int, Timer>{};
   int _blockCount = 0;
-  bool _tailWasSettled = false;
+  // Starts from the widget's own value, so text that is already finished on
+  // the first build (MarkdownStream.text) does not run a settle fade.
+  late bool _tailWasSettled = widget.tailSettled;
 
   @override
   void dispose() {

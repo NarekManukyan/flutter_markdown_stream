@@ -72,7 +72,10 @@ String maskFencedCode(String input, String mask) {
   for (var i = 0; i < lines.length; i++) {
     final line = lines[i];
     final wasOpen = fences.isOpen;
-    final isFence = fences.addLine(line);
+    // A CRLF line keeps its `\r` here; the fence pattern does not match it.
+    final isFence = fences.addLine(
+      line.endsWith('\r') ? line.substring(0, line.length - 1) : line,
+    );
     out.write(wasOpen || isFence ? mask * line.length : line);
     if (i < lines.length - 1) out.write('\n');
   }

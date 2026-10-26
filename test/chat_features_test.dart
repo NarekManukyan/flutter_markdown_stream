@@ -50,6 +50,16 @@ void main() {
       expect(find.byType(MarkdownBody).evaluate().length, staticBodies);
     });
 
+    testWidgets('a final paragraph does not fade in on first build',
+        (tester) async {
+      await tester.pumpWidget(
+        _app(MarkdownStream.text(data: 'Intro.\n\nJust a paragraph.')),
+      );
+      expect(find.byType(WordFadeText), findsNothing);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(WordFadeText), findsNothing);
+    });
+
     testWidgets('shows new data when it changes', (tester) async {
       await tester.pumpWidget(_app(MarkdownStream.text(data: 'first')));
       expect(find.text('first'), findsOneWidget);
@@ -140,6 +150,11 @@ void main() {
       ]) {
         expect(policy.apply(s), s, reason: s);
       }
+    });
+
+    test('links in CRLF fenced code are left alone', () {
+      const s = '```\r\n[c](javascript:x)\r\n```\r\n';
+      expect(policy.apply(s), s);
     });
 
     test('nested blocked image inside an allowed link', () {

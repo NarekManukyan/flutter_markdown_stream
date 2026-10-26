@@ -143,19 +143,31 @@ void main() {
     final controller = StreamController<String>();
     addTearDown(() async => controller.close());
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: MarkdownStream(
-            stream: controller.stream,
-            config: StreamingPresets.claude,
-          ),
-        ),
-      ),
+    // The claude preset's edge fade, without its pacing, so the text is on
+    // screen right away.
+    final config = StreamingPresets.claude.copyWith(
+      smoothingEnabled: false,
+      rebuildDebounce: Duration.zero,
     );
+    Widget build({required bool wordFadeIn}) => MaterialApp(
+          home: Scaffold(
+            body: MarkdownStream(
+              stream: controller.stream,
+              config: config,
+              wordFadeIn: wordFadeIn,
+            ),
+          ),
+        );
 
+    await tester.pumpWidget(build(wordFadeIn: true));
     controller.add('hello');
-    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pump();
+    expect(find.textContaining('hello'), findsOneWidget);
     expect(find.byType(ShaderMask), findsNothing);
+
+    // Same config with the word fade off draws the edge fade.
+    await tester.pumpWidget(build(wordFadeIn: false));
+    await tester.pump();
+    expect(find.byType(ShaderMask), findsOneWidget);
   });
 }
