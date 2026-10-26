@@ -97,9 +97,19 @@ void main() {
     });
 
     group('partial link', () {
-      test('strips [label](partial-url', () {
+      test('shows the label of [label](partial-url as plain text', () {
         final out = SafeMarkdownParser.sanitize('See the [docs](https://exa');
-        expect(out, 'See the ');
+        expect(out, 'See the docs');
+      });
+
+      test('keeps emphasis inside a partial link label balanced', () {
+        final out = SafeMarkdownParser.sanitize('See [**the docs**](http');
+        expect(out, 'See **the docs**');
+      });
+
+      test('hides a partial image label ![alt', () {
+        final out = SafeMarkdownParser.sanitize('before ![a diagram');
+        expect(out, 'before ');
       });
 
       test('strips ![alt](partial-url', () {
@@ -296,6 +306,142 @@ void main() {
           latexEnabled: true,
         );
         expect(out, '\$\$E=mc^2\$\$');
+      });
+    });
+
+    group('protected regions (regression)', () {
+      test('emphasis char inside inline code is ignored', () {
+        const s = 'Use `a*b` here';
+        expect(SafeMarkdownParser.sanitize(s), s);
+      });
+
+      test('underscore inside a bare URL is ignored', () {
+        const s = 'see https://example.com/_private ok';
+        expect(SafeMarkdownParser.sanitize(s), s);
+      });
+
+      test('underscore inside a link destination is ignored', () {
+        const s = 'see [x](https://example.com/_private) ok';
+        expect(SafeMarkdownParser.sanitize(s), s);
+      });
+
+      test('emphasis wrapping a bare URL still closes correctly', () {
+        const s = '_https://example.com_ done';
+        expect(SafeMarkdownParser.sanitize(s), s);
+      });
+
+      test('escaped delimiters are ignored', () {
+        const s = r'escaped \*star\* and \_under and \` tick';
+        expect(SafeMarkdownParser.sanitize(s), s);
+      });
+
+      test('double-backtick code span containing a backtick', () {
+        const s = 'call ``foo`bar`` now';
+        expect(SafeMarkdownParser.sanitize(s), s);
+      });
+
+      test('unclosed double-backtick span closes with two backticks', () {
+        expect(
+          SafeMarkdownParser.sanitize('call ``foo`bar'),
+          'call ``foo`bar``',
+        );
+      });
+
+      test('emphasis inside an open code span is not balanced', () {
+        expect(SafeMarkdownParser.sanitize('run `a **b'), 'run `a **b`');
+      });
+
+      test('a lone backtick run at line start is left for a fence', () {
+        const s = 'Here is code:\n``';
+        expect(SafeMarkdownParser.sanitize(s), s);
+      });
+
+      test('dollar inside inline code is not math', () {
+        const s = r'$x$ and `$HOME` var';
+        expect(SafeMarkdownParser.sanitize(s, latexEnabled: true), s);
+      });
+
+      test('emphasis chars inside math are ignored', () {
+        const s = r'solve $a_1 * b_2$ now';
+        expect(SafeMarkdownParser.sanitize(s, latexEnabled: true), s);
+      });
+
+      test('escaped dollar is not math', () {
+        const s = r'costs \$x today';
+        expect(SafeMarkdownParser.sanitize(s, latexEnabled: true), s);
+      });
+    });
+
+    group('closer ordering and scope (regression)', () {
+      test('closers nest innermost-first', () {
+        expect(SafeMarkdownParser.sanitize('~~a **b'), '~~a **b**~~');
+        expect(SafeMarkdownParser.sanitize('**a `b'), '**a `b`**');
+      });
+
+      test('an opener in a finished paragraph is left alone', () {
+        const s = 'a *stray\n\nsecond paragraph';
+        expect(SafeMarkdownParser.sanitize(s), s);
+      });
+
+      test('an opener in an earlier list item is left alone', () {
+        const s = '- a *stray\n- second item';
+        expect(SafeMarkdownParser.sanitize(s), s);
+      });
+
+      test('an opener in a heading does not leak into the next line', () {
+        const s = '# Title *x\nbody text';
+        expect(SafeMarkdownParser.sanitize(s), s);
+      });
+
+      test('an unclosed backtick in an earlier list item is left alone', () {
+        const s = '- run `foo\n- second';
+        expect(SafeMarkdownParser.sanitize(s), s);
+      });
+
+      test('an earlier unclosed backtick does not block emphasis repair', () {
+        expect(SafeMarkdownParser.sanitize('- a `b\n- **c'), '- a `b\n- **c**');
+      });
+
+      test('an unclosed backtick in a heading is left alone', () {
+        const s = '# Title `x\nbody';
+        expect(SafeMarkdownParser.sanitize(s), s);
+      });
+
+      test('a code span cannot pair backticks across list items', () {
+        // Item 1's backtick stays literal; item 2's two backticks pair up
+        // with each other, so nothing is left open.
+        const s = '- a `b\n- c` and `d';
+        expect(SafeMarkdownParser.sanitize(s), s);
+      });
+
+      test('emphasis still closes across soft line breaks', () {
+        expect(
+          SafeMarkdownParser.sanitize('**bold\ncontinues'),
+          '**bold\ncontinues**',
+        );
+      });
+
+      test('emphasis before a code block does not corrupt the fence', () {
+        const s = '**note\n```\ncode\n```\n';
+        expect(SafeMarkdownParser.sanitize(s), s);
+      });
+    });
+
+    group('fences (regression)', () {
+      test('closes a fence indented inside a nested list', () {
+        final out =
+            SafeMarkdownParser.sanitize('- item\n\n    ```dart\n    code');
+        expect(out, '- item\n\n    ```dart\n    code\n    ```\n');
+      });
+
+      test('a fence line with an info string does not close a block', () {
+        final out = SafeMarkdownParser.sanitize('```\nprint(1)\n```python');
+        expect(out, '```\nprint(1)\n```python\n```\n');
+      });
+
+      test('backticks in the info string mean the line is not a fence', () {
+        const s = '```js const a``` inline';
+        expect(SafeMarkdownParser.sanitize(s), s);
       });
     });
 

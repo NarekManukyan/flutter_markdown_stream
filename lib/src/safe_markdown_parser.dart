@@ -12,6 +12,8 @@
 /// buffer produces the fully-correct Markdown output automatically.
 library;
 
+import 'fence_tracker.dart';
+
 /// Static utilities for sanitizing partial Markdown.
 final class SafeMarkdownParser {
   const SafeMarkdownParser._();
@@ -21,16 +23,25 @@ final class SafeMarkdownParser {
   ///
   /// Handles, in order:
   ///   1. Line-ending normalisation.
-  ///   2. Unclosed fenced code blocks (``` or ~~~).
+  ///   2. Unclosed fenced code blocks (``` or ~~~, at any indentation).
   ///   3. Incomplete trailing GFM table rows — hidden from the projection
   ///      until they finish streaming.
   ///   4. Partial autolinks (`<http://...` without `>`).
-  ///   5. Partially-typed link / image syntax (`[label](http...`).
-  ///   6. Unclosed inline code (single backticks).
+  ///   5. Partially-typed links (`[label](http...`) — rendered as their
+  ///      label text until the URL completes — and partial images, which
+  ///      are hidden.
+  ///   6. Unclosed inline code spans (any backtick run length).
   ///   7. Unbalanced LaTeX delimiters (`$$…$$` and `$…$`), when
   ///      [latexEnabled] is `true`.
   ///   8. Unbalanced strikethrough (`~~`).
   ///   9. Unbalanced bold/italic emphasis runs (`*` and `_`).
+  ///
+  /// Steps 6–9 ignore delimiters inside inline code, backslash escapes, bare
+  /// URLs and link destinations, and only consider the block still being
+  /// written — an opener in an earlier, finished paragraph can never be
+  /// closed by later text, so it is left as the literal character it is.
+  /// Synthetic closers are appended innermost-first so nested spans close in
+  /// the right order.
   ///
   /// The function never throws. If anything unexpected happens it falls back
   /// to returning [input] unchanged.
@@ -42,25 +53,33 @@ final class SafeMarkdownParser {
   static String sanitize(String input, {bool latexEnabled = false}) {
     if (input.isEmpty) return input;
     try {
-      var text = _normalizeLineEndings(input);
-      text = _closeFencedCodeBlock(text);
-      // The following transforms only apply to content *outside* a fenced
-      // code block. _closeFencedCodeBlock has already ensured the string
-      // ends with a balanced fence, so by splitting we can skip code spans.
-      text = _transformOutsideFences(text, (chunk) {
-        var out = chunk;
-        out = _hidePartialTableRow(out);
-        out = _stripPartialAutolink(out);
-        out = _stripPartialLink(out);
-        out = _closeInlineCode(out);
-        if (latexEnabled) {
-          out = _balanceLatexDelimiters(out);
-        }
-        out = _balanceStrikethrough(out);
-        out = _balanceEmphasis(out);
-        return out;
-      });
-      return text;
+      final text = _normalizeLineEndings(input);
+
+      // Locate the prose that follows the last *closed* fenced code block —
+      // only that tail can still be mid-typing. If the text ends inside an
+      // open fence, closing the fence is the only repair needed: everything
+      // before the fence is already finished.
+      final fences = FenceTracker();
+      var tailStart = 0;
+      var offset = 0;
+      final lines = text.split('\n');
+      for (var i = 0; i < lines.length; i++) {
+        final wasOpen = fences.isOpen;
+        final isFence = fences.addLine(lines[i]);
+        offset += lines[i].length + (i == lines.length - 1 ? 0 : 1);
+        if (isFence && wasOpen) tailStart = offset;
+      }
+      if (fences.isOpen) {
+        final len = fences.openLength < 3 ? 3 : fences.openLength;
+        final closing = fences.openChar! * len;
+        final needsNewline = !text.endsWith('\n');
+        return '$text${needsNewline ? '\n' : ''}'
+            '${fences.openIndent}$closing\n';
+      }
+
+      final head = text.substring(0, tailStart);
+      final tail = text.substring(tailStart);
+      return '$head${_repairTail(tail, latexEnabled: latexEnabled)}';
     } catch (_) {
       return input;
     }
@@ -73,76 +92,16 @@ final class SafeMarkdownParser {
       s.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
 
   // ---------------------------------------------------------------------------
-  // 2. Fenced code blocks.
+  // Repairs for the trailing prose region (outside any fenced code block).
   // ---------------------------------------------------------------------------
-  //
-  // A fence is a line whose only non-whitespace content is 3+ backticks or
-  // 3+ tildes, optionally followed by an info string (for the opening fence).
-  // If the total number of fences is odd, we are currently inside one, and we
-  // append a synthetic closing fence.
-  static final RegExp _fenceRegex = RegExp(
-    r'^[ \t]{0,3}(`{3,}|~{3,})',
-    multiLine: true,
-  );
-
-  static String _closeFencedCodeBlock(String s) {
-    final matches = _fenceRegex.allMatches(s).toList();
-    if (matches.isEmpty) return s;
-    // Track which fence character opened the currently-unclosed block.
-    String? openChar;
-    var openLen = 0;
-    for (final m in matches) {
-      final fence = m.group(1)!;
-      final ch = fence[0];
-      if (openChar == null) {
-        openChar = ch;
-        openLen = fence.length;
-      } else if (ch == openChar && fence.length >= openLen) {
-        // Closing fence for the current block.
-        openChar = null;
-        openLen = 0;
-      }
-      // A different fence character inside an open block is just content —
-      // ignored.
-    }
-    if (openChar == null) return s;
-    // Append a closing fence on its own line.
-    final closing = openChar * (openLen < 3 ? 3 : openLen);
-    final needsLeadingNewline = !s.endsWith('\n');
-    return '$s${needsLeadingNewline ? '\n' : ''}$closing\n';
-  }
-
-  // ---------------------------------------------------------------------------
-  // Helper: apply [transform] to each region of [s] that is *not* inside a
-  // fenced code block. Content inside fences is passed through verbatim.
-  // ---------------------------------------------------------------------------
-  static String _transformOutsideFences(
-    String s,
-    String Function(String chunk) transform,
-  ) {
-    final matches = _fenceRegex.allMatches(s).toList();
-    if (matches.isEmpty) return transform(s);
-
-    final buffer = StringBuffer();
-    var cursor = 0;
-    var inside = false;
-    for (final m in matches) {
-      // End-of-line for this fence line.
-      final lineEnd = s.indexOf('\n', m.end);
-      final fenceLineEnd = lineEnd == -1 ? s.length : lineEnd + 1;
-      final regionEnd = inside ? fenceLineEnd : m.start;
-      final region = s.substring(cursor, regionEnd);
-      buffer.write(inside ? region : transform(region));
-      // Write the fence line verbatim if we were outside.
-      if (!inside) {
-        buffer.write(s.substring(m.start, fenceLineEnd));
-      }
-      cursor = fenceLineEnd;
-      inside = !inside;
-    }
-    final tail = s.substring(cursor);
-    buffer.write(inside ? tail : transform(tail));
-    return buffer.toString();
+  static String _repairTail(String s, {required bool latexEnabled}) {
+    if (s.isEmpty) return s;
+    var out = s;
+    out = _hidePartialTableRow(out);
+    out = _stripPartialAutolink(out);
+    out = _repairPartialLink(out);
+    out = _stripPartialImageLabel(out);
+    return '$out${_closers(out, latexEnabled: latexEnabled)}';
   }
 
   // ---------------------------------------------------------------------------
@@ -227,45 +186,228 @@ final class SafeMarkdownParser {
   // 5. Partial link / image.
   // ---------------------------------------------------------------------------
   //
-  // `flutter_markdown` tolerates `[foo`, but a half-written `[foo](http` can
-  // trip edge cases in some themes. We strip trailing incomplete link syntax
-  // — the raw buffer keeps the characters, so once the closing `)` arrives
-  // the link renders correctly.
-  static final RegExp _partialInlineLink = RegExp(r'!?\[[^\]\n]*\]\([^)\n]*$');
+  // A half-written `[label](http` is rendered as just its label, so the
+  // reader sees the words straight away instead of a gap that pops in when
+  // the URL finishes. A half-written image has nothing useful to show yet,
+  // so it is hidden. The raw buffer keeps every character, so once the
+  // closing `)` arrives the link or image renders correctly.
+  static final RegExp _partialInlineLink = RegExp(
+    r'(!?)\[([^\]\n]*)\]\([^)\n]*$',
+  );
 
-  static String _stripPartialLink(String s) {
-    // Only consider a partial link if the last `[` on the tail has no matching
-    // `)` after its `](`.
+  static String _repairPartialLink(String s) {
     final m = _partialInlineLink.firstMatch(s);
     if (m == null) return s;
-    // Confirm no closing paren exists between the match and the end.
-    final tail = s.substring(m.start);
-    if (tail.contains(')')) return s;
+    final isImage = m.group(1)!.isNotEmpty;
+    final label = isImage ? '' : m.group(2)!;
+    return '${s.substring(0, m.start)}$label';
+  }
+
+  // `![alt` with no closing bracket yet — an image is on its way.
+  static final RegExp _partialImageLabel = RegExp(r'!\[[^\]\n]*$');
+
+  static String _stripPartialImageLabel(String s) {
+    final m = _partialImageLabel.firstMatch(s);
+    if (m == null) return s;
     return s.substring(0, m.start);
   }
 
   // ---------------------------------------------------------------------------
-  // 6. Inline code.
+  // 6–9. Inline delimiters.
   // ---------------------------------------------------------------------------
   //
-  // We balance single-backtick runs line-by-line. (Multi-line inline code is
-  // rare in LLM output and visually indistinguishable from plain text in the
-  // partial state; no need to handle it specially.)
-  static String _closeInlineCode(String s) {
-    final lines = s.split('\n');
-    for (var i = 0; i < lines.length; i++) {
-      final line = lines[i];
-      // Count single-backticks (not fences — fences are already handled
-      // and we're outside them here).
-      var count = 0;
-      for (var j = 0; j < line.length; j++) {
-        if (line[j] == '`') count++;
+  // The scan works on a *masked* copy of the text, the same length as the
+  // original, in which every character that cannot act as a delimiter —
+  // inside a code span, a backslash escape, a bare URL, a link destination
+  // or (when enabled) a math span — is replaced by [_mask]. The mask
+  // character is neither whitespace nor a word character, so it does not
+  // change the flanking decisions of the delimiters around it.
+  static const String _mask = '\u0001';
+
+  static String _closers(String s, {required bool latexEnabled}) {
+    final masked = s.split('');
+    final pending = <_Closer>[];
+    final boundaries = _inlineBoundaries(s);
+
+    _maskCodeEscapesAndUrls(s, masked, pending, boundaries);
+    if (latexEnabled) _balanceLatex(masked, pending);
+
+    final scan = masked.join();
+    final scopeStart = boundaries.isEmpty ? 0 : boundaries.last;
+    _balanceStrikethrough(scan, scopeStart, pending);
+    _balanceEmphasisChar(scan, '*', scopeStart, pending);
+    _balanceEmphasisChar(scan, '_', scopeStart, pending);
+
+    if (pending.isEmpty) return '';
+    // Innermost (latest-opened) span closes first.
+    pending.sort((a, b) => b.position.compareTo(a.position));
+    return pending.map((c) => c.text).join();
+  }
+
+  // A line that begins a new block whose inline content cannot continue an
+  // emphasis span from the line above: a list item, a heading or a table
+  // row.
+  static final RegExp _blockStartLine = RegExp(
+    r'^[ \t]*([-+*][ \t]|\d{1,9}[.)][ \t]|#{1,6}([ \t]|$)|\|)',
+  );
+  static final RegExp _headingLine = RegExp(r'^[ \t]{0,3}#{1,6}([ \t]|$)');
+
+  /// Returns, in order, the offsets of the lines that start a new inline
+  /// scope: the first line after a blank line, a list item, a heading or a
+  /// table row, and the line after a heading. Inline delimiters and code spans
+  /// cannot cross these boundaries, so only openers at or after the last one
+  /// can still be closed by text that has yet to arrive.
+  static List<int> _inlineBoundaries(String s) {
+    final boundaries = <int>[];
+    var lineStart = 0;
+    var previousWasBlank = false;
+    var previousWasHeading = false;
+    while (true) {
+      var lineEnd = s.indexOf('\n', lineStart);
+      if (lineEnd == -1) lineEnd = s.length;
+      final line = s.substring(lineStart, lineEnd);
+      final blank = line.trim().isEmpty;
+      if (lineStart > 0 &&
+          ((previousWasBlank && !blank) ||
+              previousWasHeading ||
+              _blockStartLine.hasMatch(line))) {
+        boundaries.add(lineStart);
       }
-      if (count.isOdd) {
-        lines[i] = '$line`';
-      }
+      previousWasBlank = blank;
+      previousWasHeading = _headingLine.hasMatch(line);
+      if (lineEnd == s.length) break;
+      lineStart = lineEnd + 1;
     }
-    return lines.join('\n');
+    return boundaries;
+  }
+
+  static final RegExp _urlStart = RegExp(r'(https?://|www\.)');
+  static const String _urlTrailingPunctuation = '?!.,:;*_~\'"';
+
+  static void _maskRange(List<String> masked, int start, int end) {
+    for (var k = start; k < end && k < masked.length; k++) {
+      masked[k] = _mask;
+    }
+  }
+
+  /// Masks code spans, escapes, bare URLs, autolinks and link destinations,
+  /// and records a closer for a code span still open at the end of [s].
+  static void _maskCodeEscapesAndUrls(
+    String s,
+    List<String> masked,
+    List<_Closer> pending,
+    List<int> boundaries,
+  ) {
+    int nextBoundaryAfter(int i) {
+      for (final b in boundaries) {
+        if (b > i) return b;
+      }
+      return s.length;
+    }
+
+    var i = 0;
+    while (i < s.length) {
+      final c = s[i];
+
+      // Backslash escape of ASCII punctuation.
+      if (c == r'\' && i + 1 < s.length && _isAsciiPunctuation(s[i + 1])) {
+        _maskRange(masked, i, i + 2);
+        i += 2;
+        continue;
+      }
+
+      // Code span: a backtick run closed by the next run of the same
+      // length within the same block.
+      if (c == '`') {
+        var j = i;
+        while (j < s.length && s[j] == '`') {
+          j++;
+        }
+        final len = j - i;
+        final limit = nextBoundaryAfter(j);
+        var k = j;
+        var closeAt = -1;
+        while (k < limit) {
+          if (s[k] != '`') {
+            k++;
+            continue;
+          }
+          var r = k;
+          while (r < s.length && s[r] == '`') {
+            r++;
+          }
+          if (r - k == len) {
+            closeAt = k;
+            break;
+          }
+          k = r;
+        }
+        if (closeAt != -1) {
+          _maskRange(masked, i, closeAt + len);
+          i = closeAt + len;
+          continue;
+        }
+        // Unmatched run. It is a still-open code span if it sits in the
+        // block still being written, unless it is alone at the start of the
+        // last line, where it is more likely the first characters of a fence.
+        if (limit == s.length && !_isBareRunAtLineStart(s, i, j)) {
+          pending.add(_Closer(i, '`' * len));
+          _maskRange(masked, i, s.length);
+          return;
+        }
+        i = j;
+        continue;
+      }
+
+      // Complete autolink `<scheme:...>`.
+      if (c == '<') {
+        final close = s.indexOf('>', i);
+        if (close != -1) {
+          final inner = s.substring(i + 1, close);
+          if (inner.contains(':') && !inner.contains(RegExp(r'\s'))) {
+            _maskRange(masked, i, close + 1);
+            i = close + 1;
+            continue;
+          }
+        }
+      }
+
+      // Link destination `](...)`.
+      if (c == ']' && i + 1 < s.length && s[i + 1] == '(') {
+        final close = s.indexOf(')', i + 2);
+        final lineEnd = s.indexOf('\n', i);
+        if (close != -1 && (lineEnd == -1 || close < lineEnd)) {
+          _maskRange(masked, i + 2, close);
+          i = close + 1;
+          continue;
+        }
+      }
+
+      // Bare URL (GFM autolink extension). Trailing punctuation is not part
+      // of the URL, so an emphasis closer right after it still counts.
+      if ((c == 'h' || c == 'w') &&
+          (i == 0 || !_isWord(s[i - 1])) &&
+          s.startsWith(_urlStart, i)) {
+        var end = i;
+        while (end < s.length && !_isWhitespace(s[end]) && s[end] != '<') {
+          end++;
+        }
+        while (end > i && _urlTrailingPunctuation.contains(s[end - 1])) {
+          end--;
+        }
+        _maskRange(masked, i, end);
+        i = end > i ? end : i + 1;
+        continue;
+      }
+
+      i++;
+    }
+  }
+
+  static bool _isBareRunAtLineStart(String s, int runStart, int runEnd) {
+    if (runEnd != s.length) return false;
+    final lineStart = runStart == 0 ? 0 : s.lastIndexOf('\n', runStart - 1) + 1;
+    return s.substring(lineStart, runStart).trim().isEmpty;
   }
 
   // ---------------------------------------------------------------------------
@@ -273,48 +415,56 @@ final class SafeMarkdownParser {
   // ---------------------------------------------------------------------------
   //
   // Only invoked when the caller has opted into LaTeX parsing (a LaTeX
-  // syntax extension is installed). Balances unclosed `$$` blocks first
-  // (counted as pairs, two-by-two), then walks the string tracking whether
-  // an unclosed inline `$…$` span is open. A `$` may only *open* inline math
-  // when the following character is non-whitespace and not an ASCII digit
-  // — this keeps "$x+1$" math intact while leaving a currency amount like
-  // "$5" alone. Once a span is open, the next standalone `$` always closes
-  // it.
-  static String _balanceLatexDelimiters(String s) {
-    var out = s;
-    // Count `$$` occurrences. Odd → unclosed block; append a closing `$$`.
-    final blockCount = r'$$'.allMatches(out).length;
-    if (blockCount.isOdd) {
-      out = '$out\$\$';
-    }
-
-    var openInline = false;
+  // syntax extension is installed). `$$` toggles display math, which may
+  // span lines. Outside display math, a `$` may only *open* inline math when
+  // the following character is non-whitespace and not an ASCII digit — this
+  // keeps "$x+1$" math intact while leaving a currency amount like "$5"
+  // alone. Inline math cannot span lines, so an opener abandoned at a line
+  // break stays literal. Matched math spans are masked so the emphasis scan
+  // ignores `*` and `_` inside formulas.
+  static void _balanceLatex(List<String> masked, List<_Closer> pending) {
+    var blockOpen = -1;
+    var inlineOpen = -1;
     var i = 0;
-    while (i < out.length) {
-      if (out[i] != '\$') {
-        i++;
-        continue;
-      }
-      if (i + 1 < out.length && out[i + 1] == '\$') {
-        // Part of a `$$` token, not a standalone inline delimiter.
+    while (i < masked.length) {
+      final c = masked[i];
+      if (c == r'$' && i + 1 < masked.length && masked[i + 1] == r'$') {
+        if (blockOpen == -1) {
+          blockOpen = i;
+          inlineOpen = -1;
+        } else {
+          _maskRange(masked, blockOpen, i + 2);
+          blockOpen = -1;
+        }
         i += 2;
         continue;
       }
-      if (openInline) {
-        // Any standalone `$` while a span is open closes it.
-        openInline = false;
-      } else {
-        final next = i + 1 < out.length ? out[i + 1] : null;
-        if (next != null && !_isWhitespace(next) && !_isDigit(next)) {
-          openInline = true;
+      if (blockOpen != -1) {
+        i++;
+        continue;
+      }
+      if (c == '\n') {
+        inlineOpen = -1;
+      } else if (c == r'$') {
+        if (inlineOpen != -1) {
+          _maskRange(masked, inlineOpen, i + 1);
+          inlineOpen = -1;
+        } else {
+          final next = i + 1 < masked.length ? masked[i + 1] : null;
+          if (next != null && !_isWhitespace(next) && !_isDigit(next)) {
+            inlineOpen = i;
+          }
         }
       }
       i++;
     }
-    if (openInline) {
-      out = '$out\$';
+    if (blockOpen != -1) {
+      pending.add(_Closer(blockOpen, r'$$'));
+      _maskRange(masked, blockOpen, masked.length);
+    } else if (inlineOpen != -1) {
+      pending.add(_Closer(inlineOpen, r'$'));
+      _maskRange(masked, inlineOpen, masked.length);
     }
-    return out;
   }
 
   // ---------------------------------------------------------------------------
@@ -325,9 +475,13 @@ final class SafeMarkdownParser {
   // *open* when followed by non-whitespace, and may only *close* when
   // preceded by non-whitespace. A spaced "x ~~ y" is left untouched, while
   // "~~struck" gets a synthetic closer.
-  static String _balanceStrikethrough(String s) {
-    var openCount = 0;
-    var i = 0;
+  static void _balanceStrikethrough(
+    String s,
+    int scopeStart,
+    List<_Closer> pending,
+  ) {
+    final openers = <int>[];
+    var i = scopeStart;
     while (true) {
       final idx = s.indexOf('~~', i);
       if (idx == -1) break;
@@ -336,14 +490,16 @@ final class SafeMarkdownParser {
       final next = nextIdx < s.length ? s[nextIdx] : null;
       final canOpen = next != null && !_isWhitespace(next);
       final canClose = prev != null && !_isWhitespace(prev);
-      if (canClose && openCount > 0) {
-        openCount--;
+      if (canClose && openers.isNotEmpty) {
+        openers.removeLast();
       } else if (canOpen) {
-        openCount++;
+        openers.add(idx);
       }
       i = idx + 2;
     }
-    return openCount > 0 ? '$s~~' : s;
+    for (final pos in openers) {
+      pending.add(_Closer(pos, '~~'));
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -361,14 +517,7 @@ final class SafeMarkdownParser {
   //
   // Qualifying runs are tracked with a stack so that nested pairs
   // (`"**bold *and* text**"`) close in the right order, and only genuinely
-  // dangling openers get a synthetic closer appended at the end.
-  static String _balanceEmphasis(String s) {
-    var result = s;
-    result = _balanceEmphasisChar(result, '*');
-    result = _balanceEmphasisChar(result, '_');
-    return result;
-  }
-
+  // dangling openers get a synthetic closer.
   static final RegExp _thematicBreakLine = RegExp(
     r'^[ ]{0,3}([*_])(\s*\1){2,}\s*$',
   );
@@ -384,9 +533,14 @@ final class SafeMarkdownParser {
     return _thematicBreakLine.hasMatch(s.substring(lineStart, lineEnd));
   }
 
-  static String _balanceEmphasisChar(String s, String ch) {
-    final stack = <int>[];
-    var i = 0;
+  static void _balanceEmphasisChar(
+    String s,
+    String ch,
+    int scopeStart,
+    List<_Closer> pending,
+  ) {
+    final stack = <(int, int)>[];
+    var i = scopeStart;
     while (i < s.length) {
       if (s[i] != ch) {
         i++;
@@ -423,16 +577,13 @@ final class SafeMarkdownParser {
       if (canClose && stack.isNotEmpty) {
         stack.removeLast();
       } else if (canOpen) {
-        stack.add(j - i);
+        stack.add((i, j - i));
       }
       i = j;
     }
-    if (stack.isEmpty) return s;
-    final buffer = StringBuffer(s);
-    for (final len in stack.reversed) {
-      buffer.write(ch * len.clamp(1, 3));
+    for (final (pos, len) in stack) {
+      pending.add(_Closer(pos, ch * len.clamp(1, 3)));
     }
-    return buffer.toString();
   }
 
   static bool _isWord(String c) {
@@ -450,4 +601,20 @@ final class SafeMarkdownParser {
     final code = c.codeUnitAt(0);
     return code >= 0x30 && code <= 0x39;
   }
+
+  static bool _isAsciiPunctuation(String c) {
+    final code = c.codeUnitAt(0);
+    return (code >= 0x21 && code <= 0x2F) ||
+        (code >= 0x3A && code <= 0x40) ||
+        (code >= 0x5B && code <= 0x60) ||
+        (code >= 0x7B && code <= 0x7E);
+  }
+}
+
+/// A synthetic closing delimiter for an opener at [position].
+final class _Closer {
+  const _Closer(this.position, this.text);
+
+  final int position;
+  final String text;
 }

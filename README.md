@@ -216,8 +216,10 @@ layout otherwise shrink-wraps.
 ### Incremental parsing (long answers)
 
 Re-parsing the whole buffer every frame is O(n²) over a long response. Turn on
-incremental parsing to parse settled blocks once and reuse them — the settled
-output is identical, it's a pure performance switch.
+incremental parsing to render each top-level block as its own keyed
+`MarkdownBody`: a block is parsed once when it settles and only the block still
+being written is re-parsed per frame. The output is identical; it's a pure
+performance switch. (`wordFadeIn`, on by default, uses the same block split.)
 
 ```dart
 MarkdownStream(stream: llmStream, incrementalParsing: true);
@@ -240,10 +242,14 @@ MarkdownStream(
 | Unclosed italic (`*` or `_`)      | `so *cool`                    | `so *cool*`            |
 | Unclosed fenced code              | ` ```dart\nfinal x`           | ` ```dart\nfinal x\n``` ` |
 | Unclosed inline code              | `run \`dart test`             | `run \`dart test\``    |
-| Partial inline link               | `see [docs](ht`               | `see `                 |
+| Partial inline link               | `see [docs](ht`               | `see docs`             |
+| Partial image                     | `see ![chart](ht`             | `see `                 |
 | Partial autolink                  | `visit <https://exa`          | `visit `               |
 | Unclosed strikethrough            | `gone ~~away`                 | `gone ~~away~~`        |
 | Intra-word underscore             | `snake_case_var`              | left alone             |
+| Delimiters in code / URLs         | `` `a*b` `` or `x.com/_id`    | left alone             |
+| Escaped delimiters                | `\*not bold`                   | left alone             |
+| Fence nested in a list            | `` - a\n\n    ```\n    code `` | closed at same indent  |
 | CRLF / lone CR line endings       | `a\r\nb`                      | `a\nb`                 |
 
 See `test/safe_markdown_parser_test.dart` for the exhaustive matrix.
@@ -370,7 +376,9 @@ thing with `MarkdownStream`.
 | ----------------- | ---------------------------------------------------- |
 | `stream`          | `Stream<String>` of token chunks (required).         |
 | `onDone`          | Called with the full raw text when the stream ends.  |
-| `cursorWidget`    | Shown at the tail while streaming.                    |
+| `onError`         | Called when the stream emits an error.               |
+| `errorBuilder`    | Widget shown below the text after a stream error.    |
+| `cursorWidget`    | Shown inline after the last character while streaming. |
 | `rebuildDebounce` | Coalesces bursts of tokens; default 16ms.             |
 | `codeBuilder`     | Sugar for a block-code builder. See below.           |
 
