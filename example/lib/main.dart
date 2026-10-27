@@ -379,28 +379,43 @@ Questions? See [the pricing page](https://example.com/pricing).
 
 /// A reasoning-model answer: a `<think>` section, then the answer, with one
 /// link the default `LinkPolicy` blocks.
-const List<String> _thinkingChunks = <String>[
-  '<think>',
-  'The user asks for ',
-  'a packing list. ',
-  'Weather is mild, ',
-  'so layers matter ',
-  'more than a heavy coat.',
-  '</think>\n\n',
-  '## Packing list\n\n',
-  '- Light jacket\n',
-  '- Two sweaters\n',
-  '- Walking shoes\n\n',
-  'Temperatures run 12~18 °C. ',
-  'This [tracking link](javascript:alert(1)) ',
-  'is shown as plain text.',
-];
+const String _thinkingAnswer = '''<think>
+The user asks for a packing list for a weekend away. The forecast is mild, around 12 to 19 degrees, so layers matter more than a heavy coat. A table of the two days and a short list should do.
+</think>
+
+## Packing list
+
+Mild days and cool evenings, so pack **layers** rather than a heavy coat.
+
+- Light jacket
+- Two sweaters
+- Walking shoes
+
+| Day | Temperature |
+| --- | --- |
+| Friday | 14~19 °C |
+| Saturday | 12~17 °C |
+
+```dart
+final bag = Bag(items: 7);
+await bag.close();
+```
+
+This [tracking link](javascript:alert(1)) is shown as plain text.
+''';
+
+/// Splits [text] into word-sized pieces, like an LLM token stream.
+List<String> _tokens(String text) =>
+    [for (final m in RegExp(r'\S+\s*').allMatches(text)) m.group(0)!];
 
 Stream<String> _thinkingStream() async* {
   // Time to first token, so the placeholder has a moment on screen.
   await Future<void>.delayed(const Duration(milliseconds: 1200));
-  for (final c in _thinkingChunks) {
-    await Future<void>.delayed(const Duration(milliseconds: 220));
+  // Reasoning trickles in slower than the answer, as it does with real models.
+  var thinking = true;
+  for (final c in _tokens(_thinkingAnswer)) {
+    await Future<void>.delayed(Duration(milliseconds: thinking ? 140 : 60));
+    if (c.contains('</think>')) thinking = false;
     yield c;
   }
 }
@@ -414,12 +429,8 @@ class ChatFeaturesScreen extends StatefulWidget {
 
 class _ChatFeaturesScreenState extends State<ChatFeaturesScreen> {
   Stream<String>? _stream;
-  String _status = 'IDLE';
 
-  void _start() => setState(() {
-        _status = 'STREAMING';
-        _stream = _thinkingStream();
-      });
+  void _start() => setState(() => _stream = _thinkingStream());
 
   @override
   Widget build(BuildContext context) {
@@ -437,20 +448,23 @@ class _ChatFeaturesScreenState extends State<ChatFeaturesScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text('MRK_STATUS_$_status'),
-          const Divider(),
-          MarkdownStream.text(data: _historyMessage, fitContent: false),
+          MarkdownStream.text(
+            data: _historyMessage,
+            fitContent: false,
+            codeBuilder: CodeBlockView.builder(highlightBuilder: _demoHighlight),
+          ),
           const Divider(height: 32),
           if (stream != null)
             MarkdownStream(
               key: ValueKey<int>(stream.hashCode),
               stream: stream,
+              config: _smoothConfig,
               fitContent: false,
               placeholder: const ShimmerText('Thinking…'),
               cursorWidget: const BlinkingCursor(),
+              codeBuilder: CodeBlockView.builder(highlightBuilder: _demoHighlight),
               onTapLink: (text, href, title) => ScaffoldMessenger.of(context)
                   .showSnackBar(SnackBar(content: Text('Open $href'))),
-              onDone: (_) => setState(() => _status = 'DONE'),
             ),
         ],
       ),

@@ -49,3 +49,6 @@ publish.sh
 # Repository-only
 docs/
 .code-review-graph/
+
+# README media, served from GitHub
+demo/
