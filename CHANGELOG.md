@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.1
+
+Documentation only. No code changes.
+
+- New README demo recorded from the example's "Chat features" screen, a
+  "What's new in 0.6.0" summary, and a GIF of the thinking section.
+- The README's media no longer ships in the package, so the download is
+  smaller.
+- The example's "Chat features" screen streams a longer answer with a table
+  and a code block.
+
 ## 0.6.0
 
 Chat-app essentials (static messages, thinking sections, a first-token
