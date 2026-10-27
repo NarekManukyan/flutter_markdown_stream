@@ -1,13 +1,20 @@
 # Demo assets
 
-The top-level `README.md` references two files in this folder:
+The top-level `README.md` shows two GIFs from this folder:
 
-- `demo.mp4` — plays inline on GitHub.
-- `demo.gif` — fallback for pub.dev (pub.dev doesn't render `<video>` tags,
-  but it does render `<img>` GIFs).
+- `demo.gif`: the hero clip at the top of the README.
+- `thinking.gif`: the close-up in the "Thinking section" part.
 
-Both are expected to live at the repo root-relative path `demo/` so that
-the `raw.githubusercontent.com` URLs in the README resolve.
+`demo.mp4` is the same clip as `demo.gif`, for sharing. GitHub strips
+`<video>` tags from READMEs and pub.dev doesn't render them, so the README
+only uses GIFs.
+
+The README loads them from `raw.githubusercontent.com/.../main/demo/`, so
+they only show up after they are merged to `main`. The folder is listed in
+`.pubignore` and isn't part of the published package.
+
+All three come from the example app's "Chat features" screen, recorded on
+the iOS Simulator.
 
 ## Recording the demo
 
@@ -62,10 +69,3 @@ rm palette.png
 Target: the GIF should be under 5 MB — pub.dev will load it, and GitHub
 will inline it nicely. If it's bigger, drop the fps to 10 or the width
 to 480.
-
-### 4. Update the README URLs
-
-The README references `your-org` as a placeholder. Before publishing,
-replace `your-org` in `README.md` with the actual GitHub org/user that
-hosts this repo so the `raw.githubusercontent.com` URLs resolve on
-pub.dev.

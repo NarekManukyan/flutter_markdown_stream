@@ -7,21 +7,24 @@ Flicker-free, crash-safe streaming Markdown widget for Flutter. Drop it into you
 
 ## Demo
 
-<!-- GitHub renders the <video> element; pub.dev falls back to the <img> GIF. -->
-<p align="center">
-  <video src="https://raw.githubusercontent.com/NarekManukyan/flutter_markdown_stream/main/demo/demo.mp4"
-         controls muted autoplay loop playsinline width="640">
-    Your browser doesn't support the HTML5 video tag.
-  </video>
-</p>
-
 <p align="center">
   <img src="https://raw.githubusercontent.com/NarekManukyan/flutter_markdown_stream/main/demo/demo.gif"
-       alt="MarkdownStream rendering a streamed LLM response with a blinking cursor"
-       width="640" />
+       alt="A chat answer streaming in: a Thinking placeholder, a thinking section that folds away, then a heading, a list, a table and a code block fading in word by word"
+       width="420" />
 </p>
 
-*A simulated LLM response streamed token-by-token. Bold, italic, fenced code, lists, and links all render progressively without flicker, even while their closing syntax is still in flight.*
+*From the example app (`example/`, "Chat features"). The earlier message at the top is `MarkdownStream.text` with its thinking section folded. The new answer shows a placeholder until the first token, streams its thinking section, folds it to "Thought for 6s" when the answer starts, and fades the answer in word by word. The `javascript:` link on the last line renders as plain text.*
+
+## What's new in 0.6.0
+
+- [`MarkdownStream.text`](#earlier-messages-markdownstreamtext) renders earlier messages with the same look as a finished stream, and `initialText` resumes an interrupted answer.
+- A [thinking section](#thinking-section) for the `<think>` output of reasoning models, with a "Thinking…" header that becomes "Thought for 6s".
+- A [placeholder](#placeholder-before-the-first-token) until the first token arrives, and `ShimmerText` to use as one.
+- A [link policy](#safe-links-and-images) that keeps `javascript:`, `data:` and `file:` links and images out of model output.
+- Wide tables and display math scroll sideways instead of overflowing, and a single `~` in `20~25` stays a tilde.
+- Calmer motion: each word fades in over 300ms with a strong ease-out, the cursor stays solid while text arrives, and with reduce motion on the fades, the shimmer and the auto-scroll animation are off.
+
+Upgrading from 0.5.x? Read the [migration notes](CHANGELOG.md#migrating-from-05x) first. Links with custom schemes and responses that start with `<think>` render differently by default.
 
 ## Why?
 
@@ -129,6 +132,12 @@ Reasoning models (DeepSeek R1, Qwen, QwQ and others) stream a
 "Thinking…" header over the thinking text, open while the model thinks. When
 the answer starts it folds to "Thought for 12s", and a tap opens it again.
 Half-typed tags never show up as text.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/NarekManukyan/flutter_markdown_stream/main/demo/thinking.gif"
+       alt="A shimmering Thinking placeholder, then the thinking text streaming under a Thinking header, which folds to Thought for 6s when the answer starts"
+       width="480" />
+</p>
 
 ```dart
 MarkdownStream(stream: llmStream); // on by default
